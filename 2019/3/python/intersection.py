@@ -57,13 +57,13 @@ def walk_path(paths):
         length = int(item[1:])
 
         end_pos = compass[direction](begin_pos, length)
-        a, b = sorted([begin_pos, end_pos])
+        segment = Segment(*sorted([begin_pos, end_pos]))
 
         if begin_pos.x == end_pos.x:
-            v_segments.append((Segment(a, b), 'v'))
+            v_segments.append((segment, 'v'))
         else:
-            h_segments.append((Segment(a, b), 'b'))
-            h_segments.append((Segment(b, a), 'e'))
+            h_segments.append((segment, 'b'))
+            h_segments.append((Segment(segment.end, segment.begin), 'e'))
 
         begin_pos = end_pos
 
