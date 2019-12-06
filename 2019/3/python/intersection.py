@@ -10,7 +10,7 @@ class Point:
         return (abs(self.x) - abs(other.x)) + (abs(self.y) - abs(other.y))
 
     def __repr__(self):
-        return f"({self.x}, {self.y})"
+        return f"Point({self.x}, {self.y})"
 
     def __str__(self):
         return repr(self)
@@ -25,6 +25,12 @@ class Point:
             return self.y < other.y
         else:
             return False
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
+    def __hash__(self):
+        return hash((self.x, self.y))
 
 
 class Segment:
@@ -96,7 +102,26 @@ def find_intersections(segments):
                 if length != 0:
                     intersections.append((i, length))
 
-    return sorted(intersections, key=lambda x: x[1])
+    return intersections
+
+
+def compute_lengths(paths, intersects):
+    for index, path in enumerate(paths):
+        pos = Point(0, 0)
+        travelled = 0
+
+        for p in path:
+            direction = p[0]
+            length = int(p[1:])
+            for i in range(length):
+                try:
+                    item = intersects[pos]
+                    item[index] = travelled
+                except KeyError:
+                    pass
+
+                pos = compass[direction](pos, 1)
+                travelled += 1
 
 
 def main(inputfile):
@@ -112,17 +137,22 @@ def main(inputfile):
 
     intersections1 = find_intersections(segments1)
     intersections2 = find_intersections(segments2)
+    intersections = intersections1 + intersections2
 
-    print(intersections1)
-    print(intersections2)
-    if intersections1[0][1] <= intersections2[0][1]:
-        shortest = intersections1[0]
+    if intersections:
+        intersect_points = {p: [0, 0] for p, _ in intersections}
+
+        compute_lengths([path1, path2], intersect_points)
+
+        intersections.sort(key=lambda x: x[1])
+        closest, distance = intersections[0]
+        print(closest, distance)
+
+        lengths = sorted([(k, sum(v)) for k, v in intersect_points.items()], key=lambda x: x[1])
+        if lengths:
+            print('shortest travel:', lengths[0])
     else:
-        shortest = intersections2[0]
-
-    closest, distance = shortest
-    print(closest, distance)
-
+        print("No intersections found")
 
 if __name__ == '__main__':
     import sys
