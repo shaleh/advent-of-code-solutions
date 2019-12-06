@@ -27,6 +27,15 @@ class Point:
             return False
 
 
+class Segment:
+    def __init__(self, begin, end):
+        self.begin = begin
+        self.end = end
+
+    def __str__(self):
+        return f"begin: {self.begin}, end: {self.end}"
+
+
 compass = {
     'D': lambda p, v: p + ( 0, -v),
     'L': lambda p, v: p + (-v,  0),
@@ -51,10 +60,10 @@ def walk_path(paths):
         a, b = sorted([begin_pos, end_pos])
 
         if begin_pos.x == end_pos.x:
-            v_segments.append(((a, b), 'v'))
+            v_segments.append((Segment(a, b), 'v'))
         else:
-            h_segments.append(((a, b), 'b'))
-            h_segments.append(((b, a), 'e'))
+            h_segments.append((Segment(a, b), 'b'))
+            h_segments.append((Segment(b, a), 'e'))
 
         begin_pos = end_pos
 
@@ -71,17 +80,17 @@ def find_intersections(segments):
     points = set()
 
     # print(segments)
-    for (begin, end), kind in segments:
+    for segment, kind in segments:
         if kind == 'b':
-            points.add(begin)
+            points.add(segment.begin)
         elif kind == 'e':
             try:
-                points.remove(end)
+                points.remove(segment.end)
             except KeyError:
                 pass
         elif kind == 'v':
             # print(points)
-            options = [Point(begin.x, p.y) for p in points if p.y >= begin.y and p.y <= end.y]
+            options = [Point(segment.begin.x, p.y) for p in points if p.y >= segment.begin.y and p.y <= segment.end.y]
             for i in options:
                 length = i.manhattan_distance(Point(0, 0))
                 if length != 0:
@@ -98,8 +107,8 @@ def main(inputfile):
     h_segments1, v_segments1 = walk_path(path1)
     h_segments2, v_segments2 = walk_path(path2)
 
-    segments1 = sorted(h_segments1 + v_segments2, key=lambda x: x[0][0].x)
-    segments2 = sorted(h_segments2 + v_segments1, key=lambda x: x[0][0].x)
+    segments1 = sorted(h_segments1 + v_segments2, key=lambda x: x[0].begin.x)
+    segments2 = sorted(h_segments2 + v_segments1, key=lambda x: x[0].begin.x)
 
     intersections1 = find_intersections(segments1)
     intersections2 = find_intersections(segments2)
