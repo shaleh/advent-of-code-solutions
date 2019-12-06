@@ -1,29 +1,56 @@
 #!/usr/bin/env python3
 
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def manhattan_distance(self, other):
+        return (abs(self.x) - abs(other.x)) + (abs(self.y) - abs(other.y))
+
+    def __repr__(self):
+        return f"({self.x}, {self.y})"
+
+    def __str__(self):
+        return repr(self)
+
+    def __add__(self, delta):
+        return self.__class__(self.x + delta[0], self.y + delta[1])
+
+    def __lt__(self, other):
+        if self.x < other.x:
+            return self.y <= other.y
+        elif self.x == other.x:
+            return self.y < other.y
+        else:
+            return False
+
+
 compass = {
-    'D': lambda p, v: (p[0],     p[1] - v),
-    'L': lambda p, v: (p[0] - v, p[1]),
-    'R': lambda p, v: (p[0] + v, p[1]),
-    'U': lambda p, v: (p[0],     p[1] + v),
+    'D': lambda p, v: p + ( 0, -v),
+    'L': lambda p, v: p + (-v,  0),
+    'R': lambda p, v: p + ( v,  0),
+    'U': lambda p, v: p + ( 0,  v),
 }
 
 
 def walk_path(paths):
-    begin_pos = (0, 0)
+    begin_pos = Point(0, 0)
     end_pos = None
 
     h_segments = []
     v_segments = []
 
     for item in paths:
-        print(item, begin_pos)
+        # print(item, begin_pos)
         direction = item[0]
         length = int(item[1:])
 
         end_pos = compass[direction](begin_pos, length)
         a, b = sorted([begin_pos, end_pos])
 
-        if begin_pos[0] == end_pos[0]:
+        if begin_pos.x == end_pos.x:
             v_segments.append(((a, b), 'v'))
         else:
             h_segments.append(((a, b), 'b'))
@@ -43,7 +70,7 @@ def find_intersections(segments):
 
     points = set()
 
-    print(segments)
+    # print(segments)
     for (begin, end), kind in segments:
         if kind == 'b':
             points.add(begin)
@@ -53,27 +80,26 @@ def find_intersections(segments):
             except KeyError:
                 pass
         elif kind == 'v':
-            print(points)
-            options = [(begin[0], y) for _, y in points if y >= begin[1] and y <= end[1]]
+            # print(points)
+            options = [Point(begin.x, p.y) for p in points if p.y >= begin.y and p.y <= end.y]
             for i in options:
-                length = abs(i[0]) + abs(i[1])
+                length = i.manhattan_distance(Point(0, 0))
                 if length != 0:
                     intersections.append((i, length))
 
     return sorted(intersections, key=lambda x: x[1])
 
 
-def main():
-    import sys
-    with open(sys.argv[1]) as fp:
+def main(inputfile):
+    with open(inputfile) as fp:
         path1 = fp.readline().strip().split(',')
         path2 = fp.readline().strip().split(',')
 
     h_segments1, v_segments1 = walk_path(path1)
     h_segments2, v_segments2 = walk_path(path2)
 
-    segments1 = sorted(h_segments1 + v_segments2, key=lambda x: x[0][0][0])
-    segments2 = sorted(h_segments2 + v_segments1, key=lambda x: x[0][0][0])
+    segments1 = sorted(h_segments1 + v_segments2, key=lambda x: x[0][0].x)
+    segments2 = sorted(h_segments2 + v_segments1, key=lambda x: x[0][0].x)
 
     intersections1 = find_intersections(segments1)
     intersections2 = find_intersections(segments2)
@@ -90,4 +116,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    main(sys.argv[1])
