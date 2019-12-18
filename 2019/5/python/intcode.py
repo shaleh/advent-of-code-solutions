@@ -11,26 +11,38 @@ def parse(input):
     return [int(x.strip()) for x in input.strip().split(',')]
 
 
-def op_terminate(state, pointer, op, memory):
+def op_terminate(state, pointer, op, memory, _modes):
     new_state = {'should_eval': False}
     return new_state
 
 
-def op_binop(op_action, state, pointer, op, memory):
-    if state.get('should_eval', True):
-        address1, address2 = memory[pointer + 1:pointer + 2 + 1]
-        value1, value2 = memory[address1], memory[address2]
-        result = op_action(value1, value2)
-        new_state = {
-            'result_pointer': memory[pointer + 3],
-            'result': result,
-        }
-        return new_state
-
-    return {}
+def mode_for_argument(modes, position):
+    try:
+        return modes[position]
+    except IndexError:
+        return 0
 
 
-def op_input(state, pointer, op, memory):
+def op_binop(op_action, state, pointer, op, memory, modes):
+    if not state.get('should_eval', True):
+        return {}
+
+    value1 = memory[pointer + 1]
+    if mode_for_argument(modes, 0) == 0:
+        value1 = memory[value1]
+    value2 = memory[pointer + 2]
+    if mode_for_argument(modes, 1) == 0:
+        value2 = memory[value2]
+
+    result = op_action(value1, value2)
+    new_state = {
+        'result_pointer': memory[pointer + 3],
+        'result': result,
+    }
+    return new_state
+
+
+def op_input(state, pointer, op, memory, _modes):
     if state.get('should_eval', True):
         result = int(input("> "))
         new_state = {
@@ -42,30 +54,42 @@ def op_input(state, pointer, op, memory):
     return {}
 
 
-def op_output(state, pointer, op, memory):
-    if state.get('should_eval', True):
-        print(memory[memory[pointer + 1]])
-        return {'result_pointer': None}
+def op_output(state, pointer, op, memory, modes):
+    if not state.get('should_eval', True):
+        return {}
 
-    return {}
+    value = memory[pointer + 1]
+    if mode_for_argument(modes, 0) == 0:
+        value = memory[value]
+    print(value)
+    return {'result_pointer': None}
 
 
 ops = {
-    99: (1, op_terminate),
-    1: (4, partial(op_binop, operator.add)),
-    2: (4, partial(op_binop, operator.mul)),
-    3: (2, op_input),
-    4: (2, op_output),
+    99: (1, False, op_terminate),
+    1: (4, True, partial(op_binop, operator.add)),
+    2: (4, True, partial(op_binop, operator.mul)),
+    3: (2, False, op_input),
+    4: (2, True, op_output),
 }
 
 
 def evaluate(state, pointer, op, memory):
+    if op > 99:
+        base = str(op)
+        op = int(base[-2:])
+        modes = list(reversed([c for c in base[:-2]]))
+    else:
+        modes = []
+
     try:
-        pointer_increment, action = ops[op]
+        pointer_increment, supports_modes, action = ops[op]
+        if modes and not supports_modes:
+            raise NotImplementedError(f"attempt to use modes for {op}")
     except KeyError:
         raise NotImplementedError(op)
 
-    new_state = action(state, pointer, op, memory)
+    new_state = action(state, pointer, op, memory, modes)
     new_state['instruction_pointer'] = pointer + pointer_increment
     return new_state
 
