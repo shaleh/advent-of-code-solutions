@@ -17,9 +17,7 @@ def evaluate_bin_op(state, op, param1, param2):
         raise NotImplementedError(op)
 
 
-def evaluate(state, pointer, input):
-    op = input[pointer]
-
+def evaluate(state, pointer, op, memory):
     new_state = {}
 
     if op == 99:
@@ -30,16 +28,16 @@ def evaluate(state, pointer, input):
         new_state['instruction_pointer'] = pointer + 1
     elif op in (1, 2):
         if state.get('print'):
-            print(','.join([str(x) for x in input[pointer:pointer + 3 + 1]]) + ',')
+            print(','.join([str(x) for x in memory[pointer:pointer + 3 + 1]]) + ',')
         elif state.get('should_eval', True):
-            address1, address2 = input[pointer + 1:pointer + 2 + 1]
-            result = evaluate_bin_op(state, op, input[address1], input[address2])
-            new_state['result_pointer'] = input[pointer + 3]
+            address1, address2 = memory[pointer + 1:pointer + 2 + 1]
+            result = evaluate_bin_op(state, op, memory[address1], memory[address2])
+            new_state['result_pointer'] = memory[pointer + 3]
             new_state['result'] = result
         new_state['instruction_pointer'] = pointer + 4
     else:
         if state.get('print'):
-            print(','.join([str(x) for x in input[pointer:pointer+3+1]]) + ',')
+            print(','.join([str(x) for x in memory[pointer:pointer+3+1]]) + ',')
         elif state.get('should_eval', True):
             raise NotImplementedError(op)
         new_state['instruction_pointer'] = pointer + 4
@@ -48,15 +46,15 @@ def evaluate(state, pointer, input):
 
 
 def run_evaluate(input, state):
-    pointer = state['instruction_pointer']
-
-    while pointer < len(input):
-        new_state = evaluate(state, pointer, input)
-        if state.get('should_eval', True):
+    while True:
+        pointer = state['instruction_pointer']
+        if pointer >= len(input):
+            return input
+        new_state = evaluate(state, pointer, input[pointer], input)
+        if new_state.get('should_eval', True):
             result_pointer = new_state.get('result_pointer')
             if result_pointer is not None:
                 input[result_pointer] = new_state.get('result')
-        pointer = new_state['instruction_pointer']
 
         state.update(**new_state)
 
