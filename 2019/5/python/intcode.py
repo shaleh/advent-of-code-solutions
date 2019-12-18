@@ -23,16 +23,19 @@ def mode_for_argument(modes, position):
         return 0
 
 
+def memory_lookup(memory, pointer, modes, index):
+    value = memory[pointer + index + 1]
+    if mode_for_argument(modes, index) == 0:
+        value = memory[value]
+    return value
+
+
 def op_binop(op_action, state, pointer, op, memory, modes):
     if not state.get('should_eval', True):
         return {}
 
-    value1 = memory[pointer + 1]
-    if mode_for_argument(modes, 0) == 0:
-        value1 = memory[value1]
-    value2 = memory[pointer + 2]
-    if mode_for_argument(modes, 1) == 0:
-        value2 = memory[value2]
+    value1 = memory_lookup(memory, pointer, modes, 0)
+    value2 = memory_lookup(memory, pointer, modes, 1)
 
     result = op_action(value1, value2)
     new_state = {
@@ -58,11 +61,30 @@ def op_output(state, pointer, op, memory, modes):
     if not state.get('should_eval', True):
         return {}
 
-    value = memory[pointer + 1]
-    if mode_for_argument(modes, 0) == 0:
-        value = memory[value]
+    value = memory_lookup(memory, pointer, modes, 0)
     print(value)
     return {'result_pointer': None}
+
+
+def op_jump_if(op_action, state, pointer, op, memory, modes):
+    value1 = memory_lookup(memory, pointer, modes, 0)
+    value2 = memory_lookup(memory, pointer, modes, 1)
+    if op_action(value1):
+        return {'jump': value2}
+    return {}
+
+
+def op_boolean(op_action, state, pointer, op, memory, modes):
+    if not state.get('should_eval', True):
+        return {}
+
+    value1 = memory_lookup(memory, pointer, modes, 0)
+    value2 = memory_lookup(memory, pointer, modes, 1)
+    result = op_action(value1, value2)
+    return {
+        'result_pointer': memory[pointer + 3],
+        'result': int(result),
+    }
 
 
 ops = {
@@ -71,6 +93,10 @@ ops = {
     2: (4, True, partial(op_binop, operator.mul)),
     3: (2, False, op_input),
     4: (2, True, op_output),
+    5: (3, True, partial(op_jump_if, partial(operator.ne, 0))),
+    6: (3, True, partial(op_jump_if, partial(operator.eq, 0))),
+    7: (4, True, partial(op_boolean, operator.lt)),
+    8: (4, True, partial(op_boolean, operator.eq)),
 }
 
 
@@ -96,7 +122,12 @@ def evaluate(state, pointer, op, memory):
 
 def run_evaluate(input, state):
     while True:
-        pointer = state['instruction_pointer']
+        try:
+            pointer = state['jump']
+            del state['jump']
+        except KeyError:
+            pointer = state['instruction_pointer']
+
         if pointer >= len(input):
             return input
 
