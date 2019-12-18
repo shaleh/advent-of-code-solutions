@@ -78,7 +78,7 @@ def evaluate(state, pointer, op, memory):
     if op > 99:
         base = str(op)
         op = int(base[-2:])
-        modes = list(reversed([c for c in base[:-2]]))
+        modes = list(reversed([int(c) for c in base[:-2]]))
     else:
         modes = []
 
@@ -122,7 +122,7 @@ def run(input):
 
 
 def main(inputfile):
-    test()
+    # test()
     input = open(inputfile).read()
     code = parse(input)
     pretty_print_state(code)
