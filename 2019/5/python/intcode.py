@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import operator
+from functools import partial
+
 
 def parse(input):
     # first, collapse newlines and whitespace.
@@ -8,55 +11,62 @@ def parse(input):
     return [int(x.strip()) for x in input.strip().split(',')]
 
 
-def evaluate_bin_op(state, op, param1, param2):
-    if op == 1:
-        return param1 + param2
-    elif op == 2:
-        return param1 * param2
-    else:
-        raise NotImplementedError(op)
+def op_terminate(state, pointer, op, memory):
+    new_state = {'should_eval': False}
+    return new_state
+
+
+def op_binop(op_action, state, pointer, op, memory):
+    if state.get('should_eval', True):
+        address1, address2 = memory[pointer + 1:pointer + 2 + 1]
+        value1, value2 = memory[address1], memory[address2]
+        result = op_action(value1, value2)
+        new_state = {
+            'result_pointer': memory[pointer + 3],
+            'result': result,
+        }
+        return new_state
+
+    return {}
+
+
+def op_input(state, pointer, op, memory):
+    if state.get('should_eval', True):
+        result = int(input("> "))
+        new_state = {
+            'result_pointer': memory[pointer + 1],
+            'result': result,
+        }
+        return new_state
+
+    return {}
+
+
+def op_output(state, pointer, op, memory):
+    if state.get('should_eval', True):
+        print(memory[memory[pointer + 1]])
+        return {'result_pointer': None}
+
+    return {}
+
+
+ops = {
+    99: (1, op_terminate),
+    1: (4, partial(op_binop, operator.add)),
+    2: (4, partial(op_binop, operator.mul)),
+    3: (2, op_input),
+    4: (2, op_output),
+}
 
 
 def evaluate(state, pointer, op, memory):
-    new_state = {}
+    try:
+        pointer_increment, action = ops[op]
+    except KeyError:
+        raise NotImplementedError(op)
 
-    if op == 99:
-        if state.get('print'):
-            print('99,')
-        else:
-            new_state['should_eval'] = False
-        new_state['instruction_pointer'] = pointer + 1
-    elif op in (1, 2):
-        if state.get('print'):
-            print(','.join([str(x) for x in memory[pointer:pointer + 3 + 1]]) + ',')
-        elif state.get('should_eval', True):
-            address1, address2 = memory[pointer + 1:pointer + 2 + 1]
-            result = evaluate_bin_op(state, op, memory[address1], memory[address2])
-            new_state['result_pointer'] = memory[pointer + 3]
-            new_state['result'] = result
-        new_state['instruction_pointer'] = pointer + 4
-    elif op == 3:
-        if state.get('print'):
-            print(','.join([str(x) for x in memory[pointer:pointer + 1 + 1]]) + ',')
-        elif state.get('should_eval', True):
-            result = int(input("> "))
-            new_state['result_pointer'] = memory[pointer + 1]
-            new_state['result'] = result
-        new_state['instruction_pointer'] = pointer + 2
-    elif op == 4:
-        if state.get('print'):
-            print(','.join([str(x) for x in memory[pointer:pointer + 1 + 1]]) + ',')
-        elif state.get('should_eval', True):
-            print(memory[memory[pointer + 1]])
-            new_state['result_pointer'] = None
-        new_state['instruction_pointer'] = pointer + 2
-    else:
-        if state.get('print'):
-            print(','.join([str(x) for x in memory[pointer:pointer+3+1]]) + ',')
-        elif state.get('should_eval', True):
-            raise NotImplementedError(op)
-        new_state['instruction_pointer'] = pointer + 4
-
+    new_state = action(state, pointer, op, memory)
+    new_state['instruction_pointer'] = pointer + pointer_increment
     return new_state
 
 
@@ -65,11 +75,14 @@ def run_evaluate(input, state):
         pointer = state['instruction_pointer']
         if pointer >= len(input):
             return input
+
         new_state = evaluate(state, pointer, input[pointer], input)
-        if new_state.get('should_eval', True):
-            result_pointer = new_state.get('result_pointer')
-            if result_pointer is not None:
-                input[result_pointer] = new_state.get('result')
+        if new_state.get('should_eval', True) is False:
+            break
+
+        result_pointer = new_state.get('result_pointer')
+        if result_pointer is not None:
+            input[result_pointer] = new_state.get('result')
 
         state.update(**new_state)
 
@@ -77,7 +90,7 @@ def run_evaluate(input, state):
 
 
 def pretty_print_state(code):
-    run_evaluate(code, {'instruction_pointer': 0, 'print': True})
+    print(code)
 
 
 def run(input):
