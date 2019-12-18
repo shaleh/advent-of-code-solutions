@@ -43,6 +43,13 @@ def evaluate(state, pointer, op, memory):
             new_state['result_pointer'] = memory[pointer + 1]
             new_state['result'] = result
         new_state['instruction_pointer'] = pointer + 2
+    elif op == 4:
+        if state.get('print'):
+            print(','.join([str(x) for x in memory[pointer:pointer + 1 + 1]]) + ',')
+        elif state.get('should_eval', True):
+            print(memory[memory[pointer + 1]])
+            new_state['result_pointer'] = None
+        new_state['instruction_pointer'] = pointer + 2
     else:
         if state.get('print'):
             print(','.join([str(x) for x in memory[pointer:pointer+3+1]]) + ',')
