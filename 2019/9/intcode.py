@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import copy
 import operator
 from functools import partial
 
@@ -23,23 +24,56 @@ def mode_for_argument(modes, position):
         return 0
 
 
-def memory_lookup(memory, pointer, modes, index):
-    value = memory[pointer + index + 1]
-    if mode_for_argument(modes, index) == 0:
-        value = memory[value]
-    return value
+class Memory:
+    def __init__(self, program):
+        self.program = copy.copy(program)
+        self.auxilliary = {}
+
+    def access(self, position):
+        if position > len(self.program):
+            return self.auxilliary.get(position, 0)
+        return self.program[position]
+
+    def store(self, position, value):
+        if position > len(self.program):
+            self.auxilliary[position] = value
+            return
+        self.program[position] = value
+
+    def size(self):
+        return len(self.program)
+
+    def dump(self):
+        return self.program
+
+
+def memory_lookup(state, memory, pointer, modes, index):
+    position = pointer + index + 1
+    value = memory.access(position)
+
+    argument_mode = mode_for_argument(modes, index)
+
+    if argument_mode == 0:
+        return memory.access(value)
+    elif argument_mode == 1:
+        return value
+    elif argument_mode == 2:
+        position = state.get('relative_base', 0) + value
+        return memory.access(position)
+    else:
+        raise NotImplementedError(f"argument mode {argument_mode}")
 
 
 def op_binop(op_action, state, pointer, op, memory, modes):
     if not state.get('should_eval', True):
         return {}
 
-    value1 = memory_lookup(memory, pointer, modes, 0)
-    value2 = memory_lookup(memory, pointer, modes, 1)
+    value1 = memory_lookup(state, memory, pointer, modes, 0)
+    value2 = memory_lookup(state, memory, pointer, modes, 1)
 
     result = op_action(value1, value2)
     new_state = {
-        'result_pointer': memory[pointer + 3],
+        'result_pointer': memory.access(pointer + 3),
         'result': result,
     }
     return new_state
@@ -49,7 +83,7 @@ def op_input(state, pointer, op, memory, _modes):
     if state.get('should_eval', True):
         result = int(input("> "))
         new_state = {
-            'result_pointer': memory[pointer + 1],
+            'result_pointer': memory.access(pointer + 1),
             'result': result,
         }
         return new_state
@@ -61,14 +95,14 @@ def op_output(state, pointer, op, memory, modes):
     if not state.get('should_eval', True):
         return {}
 
-    value = memory_lookup(memory, pointer, modes, 0)
+    value = memory_lookup(state, memory, pointer, modes, 0)
     print(value)
     return {'result_pointer': None}
 
 
 def op_jump_if(op_action, state, pointer, op, memory, modes):
-    value1 = memory_lookup(memory, pointer, modes, 0)
-    value2 = memory_lookup(memory, pointer, modes, 1)
+    value1 = memory_lookup(state, memory, pointer, modes, 0)
+    value2 = memory_lookup(state, memory, pointer, modes, 1)
     if op_action(value1):
         return {'jump': value2}
     return {}
@@ -78,13 +112,21 @@ def op_boolean(op_action, state, pointer, op, memory, modes):
     if not state.get('should_eval', True):
         return {}
 
-    value1 = memory_lookup(memory, pointer, modes, 0)
-    value2 = memory_lookup(memory, pointer, modes, 1)
+    value1 = memory_lookup(state, memory, pointer, modes, 0)
+    value2 = memory_lookup(state, memory, pointer, modes, 1)
     result = op_action(value1, value2)
     return {
-        'result_pointer': memory[pointer + 3],
+        'result_pointer': memory.access(pointer + 3),
         'result': int(result),
     }
+
+
+def op_adjust_base(state, pointer, op, memory, modes):
+    value = memory_lookup(state, memory, pointer, modes, 0)
+    new_base = state.get('relative_base', 0) + value
+    if new_base < 0:
+        raise RuntimeError("relative_base cannot be less than zero")
+    return {'relative_base': new_base}
 
 
 ops = {
@@ -97,6 +139,7 @@ ops = {
     6: (3, True, partial(op_jump_if, partial(operator.eq, 0))),
     7: (4, True, partial(op_boolean, operator.lt)),
     8: (4, True, partial(op_boolean, operator.eq)),
+    9: (2, True, op_adjust_base),
 }
 
 
@@ -121,6 +164,8 @@ def evaluate(state, pointer, op, memory):
 
 
 def run_evaluate(input, state):
+    memory = Memory(input)
+
     while True:
         try:
             pointer = state['jump']
@@ -128,20 +173,20 @@ def run_evaluate(input, state):
         except KeyError:
             pointer = state['instruction_pointer']
 
-        if pointer >= len(input):
-            return input
+        if pointer >= memory.size():
+            return memory.dump()
 
-        new_state = evaluate(state, pointer, input[pointer], input)
+        new_state = evaluate(state, pointer, memory.access(pointer), memory)
         if new_state.get('should_eval', True) is False:
             break
 
         result_pointer = new_state.get('result_pointer')
         if result_pointer is not None:
-            input[result_pointer] = new_state.get('result')
+            memory.store(result_pointer, new_state.get('result'))
 
         state.update(**new_state)
 
-    return input
+    return memory.dump()
 
 
 def pretty_print_state(code):
