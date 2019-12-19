@@ -2,29 +2,83 @@
 import copy
 import itertools
 import sys
-from io import StringIO
+import threading
+from multiprocessing import Pipe
+from threading import Thread
 
 from intcode import run_evaluate, parse
 
 
-def run_one_amplifier(input, setting, initial_value):
-    pipe_stdin = StringIO('\n'.join([str(setting), str(initial_value)]) + '\n')
-    pipe_stdout = StringIO()
+def main():
+    c1_r, c1_w = Pipe(duplex=False)
+    c2_r, c2_w = Pipe(duplex=False)
+    quit_r, quit_w = Pipe(duplex=False)
 
-    run_evaluate(copy.copy(input), {'instruction_pointer': 0},
-                 stdin=pipe_stdin,
-                 stdout=pipe_stdout)
+    def func1():
+        for i in range(10):
+            c1_w.send(i)
+        quit_w.send(0)
 
-    return pipe_stdout.getvalue().split()[-1]
+    Thread(target=func1).start()
 
 
-def run_iteration(pattern, input):
+def run_one_amplifier(program, index, stdin, stdout):
+    data = threading.local()
+    data.program = copy.copy(program)
+    run_evaluate(data.program, {'instruction_pointer': 0},
+                 stdin=stdin, stdout=stdout)
+
+    return
+
+# def run_one_amplifier(program, index, stdin, stdout):
+#      data = threading.local()
+#      data.program = copy.copy(program)
+
+#      setting = stdin.recv()
+#      print(f"{index}: settings {setting}")
+#      value = stdin.recv()
+#      print(f"{index}: value {value}")
+#      stdout.send(value + 1)
+
+#      return
+
+
+def run_iteration(pattern, program):
     value = 0
-    print(pattern)
+    # print(pattern)
 
-    for setting in pattern:
-        value = run_one_amplifier(input, setting, value)
+    pipe1_read, pipe1_write = Pipe(duplex=False)
+    pipe2_read, pipe2_write = Pipe(duplex=False)
+    pipe3_read, pipe3_write = Pipe(duplex=False)
+    pipe4_read, pipe4_write = Pipe(duplex=False)
+    pipe5_read, pipe5_write = Pipe(duplex=False)
+    t1 = Thread(target=run_one_amplifier, args=(program, 1, pipe1_read, pipe2_write))
+    t2 = Thread(target=run_one_amplifier, args=(program, 2, pipe2_read, pipe3_write))
+    t3 = Thread(target=run_one_amplifier, args=(program, 3, pipe3_read, pipe4_write))
+    t4 = Thread(target=run_one_amplifier, args=(program, 4, pipe4_read, pipe5_write))
+    t5 = Thread(target=run_one_amplifier, args=(program, 5, pipe5_read, pipe1_write))
 
+    pipe1_write.send(pattern[0])
+    pipe1_write.send(value)
+    pipe2_write.send(pattern[1])
+    pipe3_write.send(pattern[2])
+    pipe4_write.send(pattern[3])
+    pipe5_write.send(pattern[4])
+
+    t1.start()
+    t2.start()
+    t3.start()
+    t4.start()
+    t5.start()
+
+    t5.join()
+    t4.join()
+    t3.join()
+    t2.join()
+    t1.join()
+
+    value = pipe1_read.recv()
+    print(f"Return: {value}")
     return int(value)
 
 
@@ -36,13 +90,14 @@ def main(inputfile):
 
     outputs = []
 
-    for i, pattern in enumerate(itertools.permutations(range(5))):
+    for i, pattern in enumerate(itertools.permutations(range(5, 10))):
         value = run_iteration(pattern, input)
         print("Final:", i, value)
         outputs.append((pattern, value))
 
     outputs.sort(key=lambda x: x[1])
     print(outputs[0], outputs[-1])
+    import pdb; pdb.set_trace()
 
 
 if __name__ == '__main__':

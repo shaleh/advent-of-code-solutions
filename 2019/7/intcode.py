@@ -48,7 +48,7 @@ def op_binop(op_action, state, pointer, op, memory, modes):
 
 def op_input(state, pointer, op, memory, _modes):
     if state.get('should_eval', True):
-        result = state['stdin'].readline().strip()
+        result = state['stdin'].recv()
         new_state = {
             'result_pointer': memory[pointer + 1],
             'result': int(result),
@@ -63,7 +63,7 @@ def op_output(state, pointer, op, memory, modes):
         return {}
 
     value = memory_lookup(memory, pointer, modes, 0)
-    state['stdout'].write(f"{value}\n")
+    state['stdout'].send(f"{value}")
     return {'result_pointer': None}
 
 
@@ -121,7 +121,7 @@ def evaluate(state, pointer, op, memory):
     return new_state
 
 
-def run_evaluate(input, state, stdin=sys.stdin, stdout=sys.stdout):
+def run_evaluate(input, state, stdin, stdout):
     state['stdin'] = stdin
     state['stdout'] = stdout
 
