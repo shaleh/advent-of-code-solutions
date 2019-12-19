@@ -6,14 +6,8 @@ from io import StringIO
 
 from intcode import run_evaluate, parse
 
-with open(sys.argv[1]) as fp:
-    input = parse(fp.read())
 
-print(input)
-
-outputs = []
-
-for i, pattern in enumerate(itertools.permutations(range(5))):
+def run_iteration(pattern, input):
     value = 0
     print(pattern)
 
@@ -28,8 +22,25 @@ for i, pattern in enumerate(itertools.permutations(range(5))):
 
         value = pipe_stdout.getvalue().split()[-1]
 
-    outputs.append((pattern, int(value)))
-    print("Final:", i, value)
+    return int(value)
 
-outputs.sort(key=lambda x: x[1])
-print(outputs[0], outputs[-1])
+
+def main(inputfile):
+    with open(inputfile) as fp:
+        input = parse(fp.read())
+
+    print(input)
+
+    outputs = []
+
+    for i, pattern in enumerate(itertools.permutations(range(5))):
+        value = run_iteration(pattern, input)
+        print("Final:", i, value)
+        outputs.append((pattern, value))
+
+    outputs.sort(key=lambda x: x[1])
+    print(outputs[0], outputs[-1])
+
+
+if __name__ == '__main__':
+    main(sys.argv[1])
