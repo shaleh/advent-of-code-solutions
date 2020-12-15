@@ -25,7 +25,7 @@ fn read_input() -> Vec<Vec<MapElement>> {
     input
 }
 
-fn compute_path(map: &Vec<Vec<MapElement>>) -> Vec<MapElement> {
+fn compute_path(map: &[Vec<MapElement>]) -> Vec<MapElement> {
     let mut path = Vec::new();
     let width = map[0].len();
     let height = map.len();
@@ -44,6 +44,9 @@ fn main() {
     let path = compute_path(&map);
     dbg!(&path);
     println!("Path length: {}", path.len());
-    let tree_count = path.iter().filter(|x| match x { MapElement::Tree => true, _ => false }).count();
+    let tree_count = path
+        .iter()
+        .filter(|x| matches!(x, MapElement::Tree))
+        .count();
     println!("Trees: {}", tree_count);
 }
