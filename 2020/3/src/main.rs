@@ -25,28 +25,34 @@ fn read_input() -> Vec<Vec<MapElement>> {
     input
 }
 
-fn compute_path(map: &[Vec<MapElement>]) -> Vec<MapElement> {
+fn compute_path(right: usize, down: usize, map: &[Vec<MapElement>]) -> Vec<MapElement> {
     let mut path = Vec::new();
     let width = map[0].len();
     let height = map.len();
     println!("Map width: {}, height: {}", width, height);
     let mut pos = 0;
-    for row in map {
+    for row in map.iter().step_by(down) {
         path.push(row[pos]);
-        pos = (pos + 3) % width;
+        pos = (pos + right) % width;
     }
     path
 }
 
 fn main() {
     let map = read_input();
-    dbg!(&map);
-    let path = compute_path(&map);
-    dbg!(&path);
-    println!("Path length: {}", path.len());
-    let tree_count = path
-        .iter()
-        .filter(|x| matches!(x, MapElement::Tree))
-        .count();
-    println!("Trees: {}", tree_count);
+    let mut trees = Vec::<usize>::new();
+
+    for (right, down) in vec![(1, 1), (3, 1), (5, 1), (7, 1), (1, 2)] {
+        let path = compute_path(right, down, &map);
+        println!("Path length: {}", path.len());
+        let tree_count = path
+            .iter()
+            .filter(|x| matches!(x, MapElement::Tree))
+            .count();
+        println!("Trees: {}", tree_count);
+        trees.push(tree_count);
+    }
+
+    let trees_product: usize = trees.iter().product();
+    println!("Trees product: {}", trees_product);
 }
