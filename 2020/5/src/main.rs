@@ -24,7 +24,7 @@ fn parse_value(value: &str, max: u32, lower: char, upper: char) -> u32 {
 fn parse_row_and_column(value: &str) -> (u32, u32) {
     let row_info = &value[0..7];
     let column_info = &value[7..10];
-    dbg!(row_info, column_info);
+    //dbg!(row_info, column_info);
 
     (parse_value(row_info, 128, 'F', 'B'), parse_value(column_info, 8, 'L', 'R'))
 }
@@ -36,11 +36,24 @@ const fn compute_seat_id(row: u32, column: u32) -> u32 {
 fn main() {
     let data = read_input();
     let mut max_id = 0;
+    let mut seen_ids = Vec::<u32>::new();
     for line in data {
         let (row, column) = parse_row_and_column(&line);
         let seat_id = compute_seat_id(row, column);
         max_id = max(max_id, seat_id);
-        println!("row {}, column {}, id {}", row, column, seat_id);
+        seen_ids.push(seat_id);
     }
     println!("Max id: {}", max_id);
+
+    seen_ids.sort();
+    dbg!(&seen_ids);
+ 
+    let mut last = 7;
+    for seat in seen_ids {
+        if seat - last == 2 {
+            println!("Found {}", seat - 1);
+            break;
+        }
+        last = seat;
+    }
 }
