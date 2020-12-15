@@ -19,8 +19,8 @@ impl Policy {
 }
 
 
-fn char_matches(c: Option<char>, to_match: char) -> i32 {
-    c.map_or(0, |c| if c == to_match { 1 } else {0})
+fn char_matches(c: Option<char>, to_match: char) -> bool {
+    c.map_or(false, |c| c == to_match)
 }
 
 #[derive(Clone, Debug)]
@@ -36,7 +36,7 @@ impl Password {
         let pos2: usize = policy.pos2.try_into().unwrap();
         let char1 = self.0.chars().nth(pos1 - 1);
         let char2 = self.0.chars().nth(pos2 - 1);
-        let result = char_matches(char1, policy.letter) + char_matches(char2, policy.letter);
+        let result = i32::from(char_matches(char1, policy.letter)) + i32::from(char_matches(char2, policy.letter));
         result == 1
     }
 }
