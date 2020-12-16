@@ -1,3 +1,5 @@
+#![feature(iterator_fold_self)]
+
 use std::io::{self, BufRead};
 
 fn read_input() -> Vec<Vec<String>> {
@@ -24,12 +26,17 @@ fn read_input() -> Vec<Vec<String>> {
 }
 
 fn make_set(data: &[String]) -> u32 {
+    data.iter()
+        .map(|x| compute_one_set(&x))
+        .fold_first(|acc, value| acc & value)
+        .unwrap_or(0)
+}
+
+fn compute_one_set(data: &str) -> u32 {
     let mut set = 0b0000_0000u32;
 
-    for item in data {
-        for c in item.bytes() {
-            set |= 0b0000_0001 << (c - b'a');
-        }
+    for c in data.bytes() {
+        set |= 0b0000_0001 << (c - b'a');
     }
 
     set
