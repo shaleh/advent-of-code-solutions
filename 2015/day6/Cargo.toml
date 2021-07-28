@@ -1,0 +1,10 @@
+[package]
+name = "day6"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+advent-support = {path = "../advent_support"}
+anyhow = "*"
+pest = "*"
+pest_derive = "*"

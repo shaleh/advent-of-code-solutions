@@ -1,0 +1,12 @@
+space = _{ " " }
+binary_op = { "AND" | "OR" | "LSHIFT" | "RSHIFT" }
+unary_op = { "NOT" }
+signal = { name_or_number }
+operation = { unary_operation | binary_operation | signal }
+number = { (ASCII_DIGIT){1,5} }
+name = { ASCII_ALPHA+ }
+name_or_number = { name | number }
+binary_operation = { name_or_number ~ space ~ binary_op ~ space ~ name_or_number }
+unary_operation = { unary_op ~ space ~ name_or_number }
+wire = { "->" }
+circuit_part = { operation ~ space ~ wire ~ space ~ name }

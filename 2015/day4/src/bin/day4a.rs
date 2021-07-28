@@ -1,4 +1,4 @@
-use md5::{Md5, Digest};
+use md5::{Digest, Md5};
 
 use advent_support::read_input;
 

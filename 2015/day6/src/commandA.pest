@@ -1,0 +1,7 @@
+space = _{ " " }
+comma = _{ "," }
+action = { "turn on" | "turn off" | "toggle" }
+number = { (ASCII_DIGIT){1,3} }
+range = { number ~ comma ~ number }
+through = _{ "through"  }
+light_command = { action ~ space* ~ range ~ space* ~ through ~ space* ~ range }
