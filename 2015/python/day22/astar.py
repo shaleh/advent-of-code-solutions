@@ -45,7 +45,7 @@ class State:
     opponent: Player
     spell_cast: Spell
     mana_spent: int = 0
-    active_spells: dict[str, int] = field(default_factory=dict)
+    active_spells: tuple[(str, int)] = field(default_factory=tuple)
     previous: Optional['State'] = None
 
     @property
@@ -63,7 +63,12 @@ class State:
 
 
 def resolve_active_spells(state):
-    for name, rounds_remaining in list(state.active_spells.items()):
+    if not state.active_spells:
+        return state
+
+    new_active = []
+
+    for name, rounds_remaining in state.active_spells:
         rounds_remaining -= 1
         spell = spells[name]
 
@@ -71,12 +76,12 @@ def resolve_active_spells(state):
         state.player.mana += spell.mana
 
         if rounds_remaining > 0:
-            state.active_spells[name] -= 1
+            new_active.append((name, rounds_remaining))
         else:
             if name == "Shield":
                 state.player.armor -= spell.armor
-            del state.active_spells[name]
 
+    state.active_spells = tuple(new_active)
     return state
 
 
@@ -88,11 +93,12 @@ def player_turn(state):
         return None
 
     if spell.effect:
-        if spell.name in state.active_spells:
-            logger.debug("already running")
-            return None
+        for name, _ in state.active_spells:
+            if name == spell.name:
+                logger.debug("already running")
+                return None
 
-        state.active_spells[spell.name] = spell.turns
+        state.active_spells = state.active_spells + ((spell.name, spell.turns),)
 
         if spell.name == "Shield":
             state.player.armor += spell.armor
@@ -174,7 +180,7 @@ def run(hard=False):
 
         best_damage_dealt, best_player_hp, best_mana = distances.setdefault(new_state.mana_spent, (sys.maxsize, new_state.player.hp, new_state.player.mana))
         if new_state.opponent.hp > best_damage_dealt and new_state.player.hp < best_player_hp and new_state.player.mana < best_mana:
-            logger.debug("%s, %s, %s, %s, %s, %s", new_state.spell_cast.name, new_state.mana_spent, new_state.history, new_state.opponent.hp, best_damage_dealt, best_mana)
+            #logger.debug("%s, %s, %s, %s, %s, %s", new_state.spell_cast.name, new_state.mana_spent, new_state.history, new_state.opponent.hp, best_damage_dealt, best_mana)
             continue
             #pass
 
@@ -183,14 +189,13 @@ def run(hard=False):
         for spell in spells.values():
             new_player = Player(hp=new_state.player.hp, mana=new_state.player.mana, armor=new_state.player.armor, damage=new_state.player.damage)
             new_opponent = Player(hp=new_state.opponent.hp, mana=new_state.opponent.mana, armor=new_state.opponent.armor, damage=new_state.opponent.damage)
-            new_active_spells = dict(new_state.active_spells.items())
 
             heappush(
                 queue,
                 QueueItem(
                     priority=new_state.mana_spent,
                     tag=next(unique),
-                    state=State(player=new_player, opponent=new_opponent, active_spells=new_active_spells, spell_cast=spell, mana_spent=new_state.mana_spent, previous=new_state),
+                    state=State(player=new_player, opponent=new_opponent, active_spells=new_state.active_spells, spell_cast=spell, mana_spent=new_state.mana_spent, previous=new_state),
                 ),
             )
 
@@ -210,9 +215,11 @@ def main():
         logger.setLevel(logging.DEBUG)
         logger.debug("In debug")
 
+    winning_state = None
     if args.profile:
         import cProfile
-        cProfile.run('winning_state = run()', 'astar.stats')
+        cProfile.run('state = run()', 'astar.stats')
+        winning_state = state
     else:
         winning_state = run()
 
@@ -226,9 +233,9 @@ def main():
         p = pstats.Stats('astar.stats')
         p.strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats()
 
-    winning_state = run(hard=True)
-    print(winning_state.mana_spent)
-    if args.debug or args.verbose:
-        logger.info("%s", winning_state.history)
+    # winning_state = run(hard=True)
+    # print(winning_state.mana_spent)
+    # if args.debug or args.verbose:
+    #     logger.info("%s", winning_state.history)
 
 main()
