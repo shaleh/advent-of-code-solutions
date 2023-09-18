@@ -44,9 +44,23 @@ class Player:
 class State:
     player: Player
     opponent: Player
+    spell_cast: Spell
     active_spells: dict[str, Spell] = field(default_factory=dict)
-    history: list[str] = field(default_factory=list)
     mana_spent: int = 0
+    previous: Optional['State'] = None
+
+    @property
+    def history(self):
+        return " => ".join(self.iter_path())
+
+    def iter_path(self):
+        next = self.previous
+
+        while next is not None:
+            yield next.spell_cast.name
+            next = next.previous
+
+        return
 
 
 def resolve_active_spells(state):
@@ -68,7 +82,9 @@ def resolve_active_spells(state):
     return state
 
 
-def player_turn(spell, state):
+def player_turn(state):
+    spell = state.spell_cast
+
     if spell.cost > state.player.mana:
         return None
     elif spell.name in state.active_spells:
@@ -86,7 +102,7 @@ def player_turn(spell, state):
 
     state.player.mana -= spell.cost
     state.mana_spent += spell.cost
-    state.history.append(spell.name)
+
     return state
 
 
@@ -105,15 +121,14 @@ def mode(hard, state):
 class QueueItem:
     priority: int
     tag: int
-    spell: Spell = field(compare=False)
     state: State = field(compare=False)
 
 
-def game_round(spell, state, hard=False):
+def game_round(state, hard=False):
     for step in (
         partial(mode, hard),
         resolve_active_spells,
-        partial(player_turn, spell),
+        player_turn,
         resolve_active_spells,
         opponents_turn,
     ):
@@ -138,29 +153,32 @@ def run(hard=False):
     unique = count()
 
     for spell in spells.values():
-        state = State(player=Player(hp=50, mana=500), opponent=Player(hp=55, damage=8))
+        state = State(player=Player(hp=50, mana=500), opponent=Player(hp=55, damage=8), spell_cast=spell)
         heappush(
-            queue, QueueItem(priority=0, tag=next(unique), spell=spell, state=state)
+            queue, QueueItem(priority=0, tag=next(unique), state=state)
         )
 
     while queue:
         item = heappop(queue)
 
-        new_state = game_round(item.spell, item.state, hard=hard)
+        new_state = game_round(item.state, hard=hard)
         if new_state is None:
             continue
         elif new_state.opponent.hp <= 0:
             return new_state
             break
 
+        new_state.previous = item.state
+
         for spell in spells.values():
+            next_state = deepcopy(new_state)
+            next_state.spell_cast = spell
             heappush(
                 queue,
                 QueueItem(
                     priority=new_state.mana_spent,
                     tag=next(unique),
-                    spell=spell,
-                    state=deepcopy(new_state),
+                    state=next_state,
                 ),
             )
 
