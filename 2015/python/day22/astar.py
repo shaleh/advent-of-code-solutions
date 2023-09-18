@@ -1,14 +1,15 @@
+from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
 from itertools import count
 from heapq import heappop, heappush
 from pprint import pprint
-import sys
 from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
+
 
 @dataclass
 class Spell:
@@ -43,62 +44,38 @@ class Player:
 class State:
     player: Player
     opponent: Player
-    spell_cast: Spell
+    active_spells: dict[str, Spell] = field(default_factory=dict)
+    history: list[str] = field(default_factory=list)
     mana_spent: int = 0
-    active_spells: tuple[(str, int)] = field(default_factory=tuple)
-    previous: Optional['State'] = None
-
-    @property
-    def history(self):
-        return " => ".join(spell.name for spell in self.iter_path())
-
-    def iter_path(self):
-        next = self.previous
-
-        while next is not None:
-            yield next.spell_cast
-            next = next.previous
-
-        return
 
 
 def resolve_active_spells(state):
-    if not state.active_spells:
-        return state
-
-    new_active = []
-
-    for name, rounds_remaining in state.active_spells:
-        rounds_remaining -= 1
+    for name in list(state.active_spells.keys()):
+        state.active_spells[name] -= 1
         spell = spells[name]
 
-        state.opponent.hp -= spell.damage
-        state.player.mana += spell.mana
-
-        if rounds_remaining > 0:
-            new_active.append((name, rounds_remaining))
-        else:
-            if name == "Shield":
+        if name == "Poison":
+            state.opponent.hp -= spell.damage
+        elif name == "Recharge":
+            state.player.mana += spell.mana
+        elif name == "Shield":
+            if state.active_spells[name] == 0:
                 state.player.armor -= spell.armor
 
-    state.active_spells = tuple(new_active)
+        if state.active_spells[name] == 0:
+            del state.active_spells[name]
+
     return state
 
 
-def player_turn(state):
-    spell = state.spell_cast
-
+def player_turn(spell, state):
     if spell.cost > state.player.mana:
-        logger.debug("too expensive to cast")
+        return None
+    elif spell.name in state.active_spells:
         return None
 
     if spell.effect:
-        for name, _ in state.active_spells:
-            if name == spell.name:
-                logger.debug("already running")
-                return None
-
-        state.active_spells = state.active_spells + ((spell.name, spell.turns),)
+        state.active_spells[spell.name] = spell.turns
 
         if spell.name == "Shield":
             state.player.armor += spell.armor
@@ -109,7 +86,7 @@ def player_turn(state):
 
     state.player.mana -= spell.cost
     state.mana_spent += spell.cost
-
+    state.history.append(spell.name)
     return state
 
 
@@ -124,11 +101,19 @@ def mode(hard, state):
     return state
 
 
-def game_round(distances, state, hard=False):
+@dataclass(order=True)
+class QueueItem:
+    priority: int
+    tag: int
+    spell: Spell = field(compare=False)
+    state: State = field(compare=False)
+
+
+def game_round(spell, state, hard=False):
     for step in (
         partial(mode, hard),
         resolve_active_spells,
-        player_turn,
+        partial(player_turn, spell),
         resolve_active_spells,
         opponents_turn,
     ):
@@ -137,11 +122,9 @@ def game_round(distances, state, hard=False):
             return None
         elif new_state.player.hp <= 0:
             # lose
-            logger.debug("out of hp")
             return None
         elif new_state.opponent.hp <= 0:
             # win
-            logger.debug("win")
             return new_state
 
         state = new_state
@@ -149,53 +132,35 @@ def game_round(distances, state, hard=False):
     return state
 
 
-@dataclass(order=True)
-class QueueItem:
-    priority: int
-    tag: int
-    state: State = field(compare=False)
-
-
 def run(hard=False):
     queue = []
 
     unique = count()
 
-    distances = dict()
-
     for spell in spells.values():
-        state = State(player=Player(hp=50, mana=500), opponent=Player(hp=55, damage=8), spell_cast=spell)
+        state = State(player=Player(hp=50, mana=500), opponent=Player(hp=55, damage=8))
         heappush(
-            queue, QueueItem(priority=0, tag=next(unique), state=state)
+            queue, QueueItem(priority=0, tag=next(unique), spell=spell, state=state)
         )
 
     while queue:
         item = heappop(queue)
 
-        new_state = game_round(distances, item.state, hard=hard)
+        new_state = game_round(item.spell, item.state, hard=hard)
         if new_state is None:
             continue
         elif new_state.opponent.hp <= 0:
             return new_state
-
-        best_damage_dealt, best_player_hp, best_mana = distances.setdefault(new_state.mana_spent, (sys.maxsize, new_state.player.hp, new_state.player.mana))
-        if new_state.opponent.hp > best_damage_dealt and new_state.player.hp < best_player_hp and new_state.player.mana < best_mana:
-            #logger.debug("%s, %s, %s, %s, %s, %s", new_state.spell_cast.name, new_state.mana_spent, new_state.history, new_state.opponent.hp, best_damage_dealt, best_mana)
-            continue
-            #pass
-
-        distances[new_state.mana_spent] = (new_state.opponent.hp, new_state.player.hp, new_state.player.mana)
+            break
 
         for spell in spells.values():
-            new_player = Player(hp=new_state.player.hp, mana=new_state.player.mana, armor=new_state.player.armor, damage=new_state.player.damage)
-            new_opponent = Player(hp=new_state.opponent.hp, mana=new_state.opponent.mana, armor=new_state.opponent.armor, damage=new_state.opponent.damage)
-
             heappush(
                 queue,
                 QueueItem(
                     priority=new_state.mana_spent,
                     tag=next(unique),
-                    state=State(player=new_player, opponent=new_opponent, active_spells=new_state.active_spells, spell_cast=spell, mana_spent=new_state.mana_spent, previous=new_state),
+                    spell=spell,
+                    state=deepcopy(new_state),
                 ),
             )
 
@@ -214,28 +179,30 @@ def main():
     if args.debug:
         logger.setLevel(logging.DEBUG)
         logger.debug("In debug")
-
-    winning_state = None
-    if args.profile:
-        import cProfile
-        cProfile.run('state = run()', 'astar.stats')
-        winning_state = state
     else:
-        winning_state = run()
+        logger.setLevel(logging.INFO)
 
-    print(winning_state.mana_spent)
-    if args.debug or args.verbose:
-        logger.info("%s", winning_state.history)
+    # winning_state = None
+    # if args.profile:
+    #     import cProfile
+    #     cProfile.run('state = run()', 'astar.stats')
+    #     winning_state = state
+    # else:
+    #     winning_state = run()
 
-    if args.profile:
-        import pstats
-        from pstats import SortKey
-        p = pstats.Stats('astar.stats')
-        p.strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats()
-
-    # winning_state = run(hard=True)
     # print(winning_state.mana_spent)
     # if args.debug or args.verbose:
     #     logger.info("%s", winning_state.history)
+
+    # if args.profile:
+    #     import pstats
+    #     from pstats import SortKey
+    #     p = pstats.Stats('astar.stats')
+    #     p.strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats()
+
+    winning_state = run(hard=True)
+    print(winning_state.mana_spent)
+    if args.debug or args.verbose:
+        logger.info("%s", winning_state.history)
 
 main()
