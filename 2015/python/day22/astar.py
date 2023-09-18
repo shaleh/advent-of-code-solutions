@@ -13,7 +13,7 @@ logger.addHandler(logging.StreamHandler())
 
 @dataclass
 class Spell:
-    name: str
+    index: int
     cost: int
     effect: bool = False
     turns: Optional[int] = None
@@ -23,13 +23,22 @@ class Spell:
     mana: int = 0
 
 
-spells = {
-    "Magic Missile": Spell("Magic Missile", 53, damage=4),
-    "Drain": Spell("Drain", 73, damage=2, heal=2),
-    "Shield": Spell("Shield", 113, damage=0, armor=7, mana=0, effect=True, turns=6),
-    "Poison": Spell("Poison", 173, damage=3, mana=0, effect=True, turns=6),
-    "Recharge": Spell("Recharge", 229, mana=101, effect=True, turns=5),
-}
+SPELL_BOOK = dict()
+SPELLS_BY_NAME = dict()
+SPELL_NAMES = dict()
+
+spell_data = [
+    ("Magic Missile", {'cost': 53, 'damage': 4}),
+    ("Drain", {'cost': 73, 'damage': 2, 'heal': 2}),
+    ("Shield", {'cost': 113, 'damage': 0, 'armor': 7, 'mana': 0, 'effect': True, 'turns': 6}),
+    ("Poison", {'cost': 173, 'damage': 3, 'mana': 0, 'effect': True, 'turns': 6}),
+    ("Recharge", {'cost': 229, 'mana': 101, 'effect': True, 'turns': 5}),
+]
+for index, (name, data) in enumerate(spell_data):
+    spell = Spell(index=index, **data)
+    SPELL_BOOK[index] = spell
+    SPELL_NAMES[index] = name
+    SPELLS_BY_NAME[name] = index
 
 
 @dataclass
@@ -45,7 +54,7 @@ class State:
     player: Player
     opponent: Player
     spell_cast: Spell
-    active_spells: dict[str, Spell] = field(default_factory=dict)
+    active_spells: dict[int, int] = field(default_factory=dict)
     mana_spent: int = 0
     previous: Optional['State'] = None
 
@@ -57,27 +66,24 @@ class State:
         next = self.previous
 
         while next is not None:
-            yield next.spell_cast.name
+            yield SPELL_NAMES[next.spell_cast.index]
             next = next.previous
 
         return
 
 
 def resolve_active_spells(state):
-    for name in list(state.active_spells.keys()):
-        state.active_spells[name] -= 1
-        spell = spells[name]
+    for index in list(state.active_spells.keys()):
+        state.active_spells[index] -= 1
+        spell = SPELL_BOOK[index]
 
-        if name == "Poison":
-            state.opponent.hp -= spell.damage
-        elif name == "Recharge":
-            state.player.mana += spell.mana
-        elif name == "Shield":
-            if state.active_spells[name] == 0:
+        state.opponent.hp -= spell.damage
+        state.player.mana += spell.mana
+
+        if state.active_spells[index] == 0:
+            del state.active_spells[spell.index]
+            if SPELL_NAMES[spell.index] == "Shield":
                 state.player.armor -= spell.armor
-
-        if state.active_spells[name] == 0:
-            del state.active_spells[name]
 
     return state
 
@@ -87,13 +93,13 @@ def player_turn(state):
 
     if spell.cost > state.player.mana:
         return None
-    elif spell.name in state.active_spells:
+    elif spell.index in state.active_spells:
         return None
 
     if spell.effect:
-        state.active_spells[spell.name] = spell.turns
+        state.active_spells[spell.index] = spell.turns
 
-        if spell.name == "Shield":
+        if SPELL_NAMES[spell.index] == "Shield":
             state.player.armor += spell.armor
     else:
         state.opponent.hp -= spell.damage
@@ -152,7 +158,7 @@ def run(hard=False):
 
     unique = count()
 
-    for spell in spells.values():
+    for spell in SPELL_BOOK.values():
         state = State(player=Player(hp=50, mana=500), opponent=Player(hp=55, damage=8), spell_cast=spell)
         heappush(
             queue, QueueItem(priority=0, tag=next(unique), state=state)
@@ -170,7 +176,7 @@ def run(hard=False):
 
         new_state.previous = item.state
 
-        for spell in spells.values():
+        for spell in SPELL_BOOK.values():
             next_state = deepcopy(new_state)
             next_state.spell_cast = spell
             heappush(
@@ -221,6 +227,8 @@ def main():
     winning_state = run(hard=True)
     print(winning_state.mana_spent)
     if args.debug or args.verbose:
-        logger.info("%s", winning_state.history)
+        #print(winning_state.previous)
+        #logger.info("%s", winning_state.history)
+        pass
 
 main()
