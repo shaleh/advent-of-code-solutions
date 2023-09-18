@@ -1,11 +1,10 @@
-from copy import deepcopy
-from dataclasses import asdict, dataclass, field
-from functools import partial
-from itertools import count
-from heapq import heappop, heappush
-from pprint import pprint
-from typing import Optional
 import logging
+import sys
+from dataclasses import dataclass, field
+from functools import partial
+from heapq import heappop, heappush
+from itertools import count
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -28,11 +27,14 @@ SPELL_NAMES = dict()
 SPELLS_BY_NAME = dict()
 
 spell_data = [
-    ("Magic Missile", {'cost': 53, 'damage': 4}),
-    ("Drain", {'cost': 73, 'damage': 2, 'heal': 2}),
-    ("Shield", {'cost': 113, 'damage': 0, 'armor': 7, 'mana': 0, 'effect': True, 'turns': 6}),
-    ("Poison", {'cost': 173, 'damage': 3, 'mana': 0, 'effect': True, 'turns': 6}),
-    ("Recharge", {'cost': 229, 'mana': 101, 'effect': True, 'turns': 5}),
+    ("Magic Missile", {"cost": 53, "damage": 4}),
+    ("Drain", {"cost": 73, "damage": 2, "heal": 2}),
+    (
+        "Shield",
+        {"cost": 113, "damage": 0, "armor": 7, "mana": 0, "effect": True, "turns": 6},
+    ),
+    ("Poison", {"cost": 173, "damage": 3, "mana": 0, "effect": True, "turns": 6}),
+    ("Recharge", {"cost": 229, "mana": 101, "effect": True, "turns": 5}),
 ]
 for index, (name, data) in enumerate(spell_data):
     spell = Spell(index=index, **data)
@@ -56,7 +58,7 @@ class State:
     spell_cast: Spell
     mana_spent: int = 0
     active_spells: tuple[(int, int)] = field(default_factory=tuple)
-    previous: Optional['State'] = None
+    previous: Optional["State"] = None
 
     @property
     def history(self):
@@ -162,14 +164,17 @@ def game_round(state, hard=False):
 
 def run(hard=False):
     queue = []
+    distances = dict()
 
     unique = count()
 
     for spell in SPELL_BOOK.values():
-        state = State(player=Player(hp=50, mana=500), opponent=Player(hp=55, damage=8), spell_cast=spell)
-        heappush(
-            queue, QueueItem(priority=0, tag=next(unique), state=state)
+        state = State(
+            player=Player(hp=50, mana=500),
+            opponent=Player(hp=55, damage=8),
+            spell_cast=spell,
         )
+        heappush(queue, QueueItem(priority=0, tag=next(unique), state=state))
 
     while queue:
         item = heappop(queue)
@@ -181,16 +186,42 @@ def run(hard=False):
             return new_state
             break
 
-        new_state.previous = item.state
+        best_damage_dealt, best_player_hp, best_mana = distances.setdefault(
+            new_state.mana_spent,
+            (sys.maxsize, new_state.player.hp, new_state.player.mana),
+        )
+        if (
+            new_state.opponent.hp > best_damage_dealt
+            or new_state.player.hp < best_player_hp
+            or new_state.player.mana < best_mana
+        ):
+            continue
+
+        distances[new_state.mana_spent] = (
+            new_state.opponent.hp,
+            new_state.player.hp,
+            new_state.player.mana,
+        )
 
         for spell in SPELL_BOOK.values():
-            next_player = Player(**asdict(new_state.player))
-            next_opponent = Player(**asdict(new_state.opponent))
+            next_player = Player(
+                hp=new_state.player.hp,
+                armor=new_state.player.armor,
+                damage=new_state.player.damage,
+                mana=new_state.player.mana,
+            )
+            next_opponent = Player(
+                hp=new_state.opponent.hp,
+                armor=new_state.opponent.armor,
+                damage=new_state.opponent.damage,
+                mana=new_state.opponent.mana,
+            )
+
             next_state = State(
                 player=next_player,
                 opponent=next_opponent,
                 mana_spent=new_state.mana_spent,
-                active_spells=deepcopy(new_state.active_spells),
+                active_spells=new_state.active_spells[:],
                 spell_cast=spell,
                 previous=new_state,
             )
@@ -210,10 +241,11 @@ def run(hard=False):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='RPG')
-    parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--verbose', action='store_true')
-    parser.add_argument('--profile', action='store_true')
+    parser = argparse.ArgumentParser(description="RPG")
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--hard", action="store_true")
 
     args = parser.parse_args()
     if args.debug:
@@ -222,29 +254,24 @@ def main():
     else:
         logger.setLevel(logging.INFO)
 
-    # winning_state = None
-    # if args.profile:
-    #     import cProfile
-    #     cProfile.run('state = run()', 'astar.stats')
-    #     winning_state = state
-    # else:
-    #     winning_state = run()
+    winning_state = None
+    if args.profile:
+        import cProfile
+        import pstats
+        from pstats import SortKey
 
-    # print(winning_state.mana_spent)
-    # if args.debug or args.verbose:
-    #     logger.info("%s", winning_state.history)
+        state = None
+        cProfile.run(f"state = run(hard={args.hard})", "astar.stats")
+        winning_state = state
+        p = pstats.Stats("astar.stats")
+        p.strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats()
+    else:
+        winning_state = run(hard=args.hard)
 
-    # if args.profile:
-    #     import pstats
-    #     from pstats import SortKey
-    #     p = pstats.Stats('astar.stats')
-    #     p.strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats()
-
-    winning_state = run(hard=True)
     print(winning_state.mana_spent)
     if args.debug or args.verbose:
-        #print(winning_state.previous)
-        #logger.info("%s", winning_state.history)
+        logger.info("%s", winning_state.history)
         pass
+
 
 main()
