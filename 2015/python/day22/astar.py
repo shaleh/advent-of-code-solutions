@@ -55,7 +55,7 @@ class State:
     opponent: Player
     spell_cast: Spell
     mana_spent: int = 0
-    active_spells: dict[int, int] = field(default_factory=dict)
+    active_spells: tuple[(int, int)] = field(default_factory=tuple)
     previous: Optional['State'] = None
 
     @property
@@ -73,18 +73,25 @@ class State:
 
 
 def resolve_active_spells(state):
-    for index in list(state.active_spells.keys()):
-        state.active_spells[index] -= 1
+    if not state.active_spells:
+        return state
+
+    new_active = []
+
+    for index, rounds_remaining in state.active_spells:
         spell = SPELL_BOOK[index]
+        rounds_remaining -= 1
 
         state.opponent.hp -= spell.damage
         state.player.mana += spell.mana
 
-        if state.active_spells[index] == 0:
-            del state.active_spells[spell.index]
+        if rounds_remaining > 0:
+            new_active.append((index, rounds_remaining))
+        else:
             if SPELL_NAMES[spell.index] == "Shield":
                 state.player.armor -= spell.armor
 
+    state.active_spells = tuple(new_active)
     return state
 
 
@@ -93,11 +100,11 @@ def player_turn(state):
 
     if spell.cost > state.player.mana:
         return None
-    elif spell.index in state.active_spells:
+    elif any(spell.index == index for index, _ in state.active_spells):
         return None
 
     if spell.effect:
-        state.active_spells[spell.index] = spell.turns
+        state.active_spells = state.active_spells + ((spell.index, spell.turns),)
 
         if SPELL_NAMES[spell.index] == "Shield":
             state.player.armor += spell.armor
@@ -197,7 +204,7 @@ def run(hard=False):
                 ),
             )
 
-    return None
+    raise SystemExit("no solution found")
 
 
 def main():
