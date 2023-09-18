@@ -1,5 +1,5 @@
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from functools import partial
 from itertools import count
 from heapq import heappop, heappush
@@ -24,8 +24,8 @@ class Spell:
 
 
 SPELL_BOOK = dict()
-SPELLS_BY_NAME = dict()
 SPELL_NAMES = dict()
+SPELLS_BY_NAME = dict()
 
 spell_data = [
     ("Magic Missile", {'cost': 53, 'damage': 4}),
@@ -54,8 +54,8 @@ class State:
     player: Player
     opponent: Player
     spell_cast: Spell
-    active_spells: dict[int, int] = field(default_factory=dict)
     mana_spent: int = 0
+    active_spells: dict[int, int] = field(default_factory=dict)
     previous: Optional['State'] = None
 
     @property
@@ -177,8 +177,17 @@ def run(hard=False):
         new_state.previous = item.state
 
         for spell in SPELL_BOOK.values():
-            next_state = deepcopy(new_state)
-            next_state.spell_cast = spell
+            next_player = Player(**asdict(new_state.player))
+            next_opponent = Player(**asdict(new_state.opponent))
+            next_state = State(
+                player=next_player,
+                opponent=next_opponent,
+                mana_spent=new_state.mana_spent,
+                active_spells=deepcopy(new_state.active_spells),
+                spell_cast=spell,
+                previous=new_state,
+            )
+
             heappush(
                 queue,
                 QueueItem(
