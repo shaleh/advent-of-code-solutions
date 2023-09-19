@@ -82,6 +82,11 @@ def resolve_active_spells(state):
 
     for index, rounds_remaining in state.active_spells:
         spell = SPELL_BOOK[index]
+
+        if rounds_remaining == spell.turns:
+            if SPELL_NAMES[spell.index] == "Shield":
+                state.player.armor += spell.armor
+
         rounds_remaining -= 1
 
         state.opponent.hp -= spell.damage
@@ -107,9 +112,6 @@ def player_turn(state):
 
     if spell.effect:
         state.active_spells = state.active_spells + ((spell.index, spell.turns),)
-
-        if SPELL_NAMES[spell.index] == "Shield":
-            state.player.armor += spell.armor
     else:
         state.opponent.hp -= spell.damage
         state.player.armor += spell.armor
@@ -126,7 +128,7 @@ def opponents_turn(state):
     return state
 
 
-def mode(hard, state):
+def pre_step(hard, state):
     if hard:
         state.player.hp -= 1
     return state
@@ -141,7 +143,7 @@ class QueueItem:
 
 def game_round(state, hard=False):
     for step in (
-        partial(mode, hard),
+        partial(pre_step, hard),
         resolve_active_spells,
         player_turn,
         resolve_active_spells,
@@ -184,24 +186,29 @@ def run(hard=False):
             continue
         elif new_state.opponent.hp <= 0:
             return new_state
-            break
 
-        best_damage_dealt, best_player_hp, best_mana = distances.setdefault(
-            new_state.mana_spent,
-            (sys.maxsize, new_state.player.hp, new_state.player.mana),
-        )
-        if (
-            new_state.opponent.hp > best_damage_dealt
-            or new_state.player.hp < best_player_hp
-            or new_state.player.mana < best_mana
-        ):
-            continue
+        try:
+            # Lower opponent hp good. Higher player hp good. More mana good.
+            best_opponent_hp, best_player_hp, best_mana = distances[new_state.mana_spent]
+        except KeyError:
+            distances[new_state.mana_spent] = (
+                new_state.opponent.hp,
+                new_state.player.hp,
+                new_state.player.mana,
+            )
+        else:
+            if (
+                new_state.opponent.hp > best_opponent_hp
+                or new_state.player.hp < best_player_hp
+                or new_state.player.mana < best_mana
+            ):
+                continue
 
-        distances[new_state.mana_spent] = (
-            new_state.opponent.hp,
-            new_state.player.hp,
-            new_state.player.mana,
-        )
+            distances[new_state.mana_spent] = (
+                new_state.opponent.hp,
+                new_state.player.hp,
+                new_state.player.mana,
+            )
 
         for spell in SPELL_BOOK.values():
             next_player = Player(
