@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 
 use std::cmp::{max, Ordering};
-use std::collections::{BinaryHeap, HashMap};
 use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, HashMap};
 use std::env;
 use std::fs;
+use std::ops::RangeFrom;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -108,20 +109,26 @@ impl Player {
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
+struct GameState<'a> {
+    mana_spent: u32,
+    spell_cast: Spell<'a>,
+    active_spells: HashMap<&'a str, u32>,
+}
+
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
 struct State<'a> {
     index: u32,
-    mana_spent: u32,
     player: Player,
     opponent: Player,
-    spell_cast: Spell<'a>,
-    active_spells: HashMap<&'a str, u32>
+    gamestate: GameState<'a>,
 }
 
 impl<'a> Ord for State<'a> {
     fn cmp(&self, other: &Self) -> Ordering {
         other
+            .gamestate
             .mana_spent
-            .cmp(&self.mana_spent)
+            .cmp(&self.gamestate.mana_spent)
             .then_with(|| other.index.cmp(&self.index))
     }
 }
@@ -132,204 +139,231 @@ impl<'a> PartialOrd for State<'a> {
     }
 }
 
-fn run(opponent: &Player, hard_mode: bool) -> Option<u32> {
+fn pre_step(hard_mode: bool, state: &mut State) -> GameFlow {
+    if hard_mode {
+        state.player.hp = state.player.hp.saturating_sub(1);
+    }
+    GameFlow::Continue
+}
+
+fn resolve_active_spells(state: &mut State) -> GameFlow {
+    if state.gamestate.active_spells.is_empty() {
+        return GameFlow::Continue;
+    }
+
+    for (name, rounds_remaining) in state.gamestate.active_spells.iter_mut() {
+        let spell = SPELL_BOOK.iter().find(|spell| spell.name == *name).unwrap();
+        if spell.name == "Shield" && *rounds_remaining == spell.duration {
+            state.player.armor += spell.armor;
+        }
+
+        *rounds_remaining = rounds_remaining.saturating_sub(1);
+
+        state.opponent.hp -= spell.damage;
+        state.player.mana += spell.mana;
+
+        if *rounds_remaining == 0 && spell.name == "Shield" {
+            state.player.armor -= spell.armor;
+        }
+    }
+
+    state
+        .gamestate
+        .active_spells
+        .retain(|_, rounds_remaining| *rounds_remaining > 0);
+    GameFlow::Continue
+}
+
+fn player_turn(state: &mut State) -> GameFlow {
+    if state.gamestate.spell_cast.cost > state.player.mana {
+        return GameFlow::Invalid;
+    }
+
+    if state.gamestate.spell_cast.duration > 0 {
+        if state
+            .gamestate
+            .active_spells
+            .contains_key(state.gamestate.spell_cast.name)
+        {
+            return GameFlow::Invalid;
+        }
+
+        state.gamestate.active_spells.insert(
+            state.gamestate.spell_cast.name,
+            state.gamestate.spell_cast.duration,
+        );
+    } else {
+        state.opponent.hp = state
+            .opponent
+            .hp
+            .saturating_sub(state.gamestate.spell_cast.damage);
+        state.player.hp = state
+            .player
+            .hp
+            .saturating_add(state.gamestate.spell_cast.heal);
+        state.player.armor = state
+            .player
+            .armor
+            .saturating_add(state.gamestate.spell_cast.armor);
+    }
+
+    state.player.mana = state
+        .player
+        .mana
+        .saturating_sub(state.gamestate.spell_cast.cost);
+    state.gamestate.mana_spent = state
+        .gamestate
+        .mana_spent
+        .saturating_add(state.gamestate.spell_cast.cost);
+
+    GameFlow::Continue
+}
+
+fn opponents_turn(state: &mut State) -> GameFlow {
+    state.player.hp = state.player.hp.saturating_sub(max(
+        state.opponent.damage.saturating_sub(state.player.armor),
+        1,
+    ));
+    GameFlow::Continue
+}
+
+fn check_if_best(
+    distances: &mut HashMap<u32, (u32, u32, u32)>,
+    player: &Player,
+    opponent: &Player,
+    gamestate: &GameState,
+) -> GameFlow {
+    match distances.entry(gamestate.mana_spent) {
+        Entry::Occupied(mut occupied) => {
+            let (best_opponent_hp, best_player_hp, best_mana) = occupied.get();
+            if opponent.hp > *best_opponent_hp
+                || player.hp < *best_player_hp
+                || player.mana < *best_mana
+            {
+                // This iteration is not better than previous ones. Prune.
+                return GameFlow::Invalid;
+            }
+            occupied.insert((opponent.hp, player.hp, player.mana));
+        }
+        Entry::Vacant(vacant) => {
+            vacant.insert((opponent.hp, player.hp, player.mana));
+        }
+    }
+
+    GameFlow::Continue
+}
+
+fn run(initial_state: &State, hard_mode: bool) -> Option<u32> {
     let mut queue = BinaryHeap::new();
     let mut distances = HashMap::new();
 
-    let mut unique = 0..;
+    let mut unique_values = 0..;
+
+    // First time this will fill in distances.
+    check_if_best(
+        &mut distances,
+        &initial_state.player,
+        &initial_state.opponent,
+        &initial_state.gamestate,
+    );
 
     for spell in SPELL_BOOK {
-        let state = State {
-            player: Player {
-                hp: 50,
-                mana: 500,
-                ..Default::default()
-            },
-            opponent: *opponent,
+        let new_gamestate = GameState {
             spell_cast: spell,
-            index: unique.next().unwrap(),
-	    ..Default::default()
+            ..initial_state.gamestate.clone()
         };
-        queue.push(state);
+        let next_state = State {
+            player: initial_state.player,
+            opponent: initial_state.opponent,
+            gamestate: new_gamestate,
+            index: unique_values.next().unwrap(),
+        };
+        queue.push(next_state);
     }
 
     while let Some(mut state) = queue.pop() {
-	let decision = /*'pre_step:*/ {
-	    if hard_mode {
-		state.player.hp = state.player.hp.saturating_sub(1);
-	    }
-	    GameFlow::Continue
-	};
-	if decision != GameFlow::Continue {
-	    continue;
-	} else if !state.opponent.is_alive() {
-	    return Some(state.mana_spent);
-	} else if !state.player.is_alive() {
-	    continue;
-	}
+        let decision = pre_step(hard_mode, &mut state);
+        if decision != GameFlow::Continue {
+            continue;
+        } else if !state.opponent.is_alive() {
+            return Some(state.gamestate.mana_spent);
+        } else if !state.player.is_alive() {
+            continue;
+        }
 
-	let decision = 'resolve_active_spells_one: {
-	    if state.active_spells.is_empty() {
-		break 'resolve_active_spells_one GameFlow::Continue;
-	    }
+        let decision = resolve_active_spells(&mut state);
+        if decision != GameFlow::Continue {
+            continue;
+        } else if !state.opponent.is_alive() {
+            return Some(state.gamestate.mana_spent);
+        } else if !state.player.is_alive() {
+            continue;
+        }
 
-	    for (name, rounds_remaining) in state.active_spells.iter_mut() {
-		let spell = SPELL_BOOK.iter().find(|spell| spell.name == *name).unwrap();
-		if spell.name == "Shield" && *rounds_remaining == spell.duration {
-		    state.player.armor += spell.armor;
-		}
+        let decision = player_turn(&mut state);
+        if decision != GameFlow::Continue {
+            continue;
+        } else if !state.opponent.is_alive() {
+            return Some(state.gamestate.mana_spent);
+        } else if !state.player.is_alive() {
+            continue;
+        }
 
-		*rounds_remaining = rounds_remaining.saturating_sub(1);
+        let decision = resolve_active_spells(&mut state);
+        if decision != GameFlow::Continue {
+            continue;
+        } else if !state.opponent.is_alive() {
+            return Some(state.gamestate.mana_spent);
+        } else if !state.player.is_alive() {
+            continue;
+        }
 
-		state.opponent.hp -= spell.damage;
-		state.player.mana += spell.mana;
+        let decision = opponents_turn(&mut state);
+        if decision != GameFlow::Continue {
+            continue;
+        } else if !state.opponent.is_alive() {
+            return Some(state.gamestate.mana_spent);
+        } else if !state.player.is_alive() {
+            continue;
+        }
 
-		if *rounds_remaining == 0 && spell.name == "Shield" {
-		    state.player.armor -= spell.armor;
-		}
-	    }
+        let decision = check_if_best(
+            &mut distances,
+            &state.player,
+            &state.opponent,
+            &state.gamestate,
+        );
+        if decision != GameFlow::Continue {
+            continue;
+        }
 
-	    state.active_spells.retain(|_, rounds_remaining| *rounds_remaining > 0);
-	    GameFlow::Continue
-	};
-	if decision != GameFlow::Continue {
-	    continue;
-	} else if !state.opponent.is_alive() {
-	    return Some(state.mana_spent);
-	} else if !state.player.is_alive() {
-	    continue;
-	}
-
-	let decision = 'player_turn: {
-	    if state.spell_cast.cost > state.player.mana {
-		break 'player_turn GameFlow::Invalid;
-	    }
-
-	    if state.spell_cast.duration > 0 {
-		if state.active_spells.contains_key(state.spell_cast.name) {
-		    break 'player_turn GameFlow::Invalid;
-		}
-
-		state.active_spells.insert(state.spell_cast.name, state.spell_cast.duration);
-	    } else {
-		state.opponent.hp =  state.opponent.hp.saturating_sub( state.spell_cast.damage);
-		state.player.hp =    state.player.hp.saturating_add(   state.spell_cast.heal);
-		state.player.armor = state.player.armor.saturating_add(state.spell_cast.armor);
-	    }
-
-	    state.player.mana = state.player.mana.saturating_sub(state.spell_cast.cost);
-	    state.mana_spent =  state.mana_spent.saturating_add( state.spell_cast.cost);
-
-	    GameFlow::Continue
-	};
-	if decision != GameFlow::Continue {
-	    continue;
-	} else if !state.opponent.is_alive() {
-	    return Some(state.mana_spent);
-	} else if !state.player.is_alive() {
-	    continue;
-	}
-
-	let decision = 'resolve_active_spells_two: {
-	    if state.active_spells.is_empty() {
-		break 'resolve_active_spells_two GameFlow::Continue;
-	    }
-
-	    for (name, rounds_remaining) in state.active_spells.iter_mut() {
-		let spell = SPELL_BOOK.iter().find(|spell| spell.name == *name).unwrap();
-		if spell.name == "Shield" && *rounds_remaining == spell.duration {
-		    state.player.armor += spell.armor;
-		}
-
-		*rounds_remaining = rounds_remaining.saturating_sub(1);
-
-		state.opponent.hp -= spell.damage;
-		state.player.mana += spell.mana;
-
-		if *rounds_remaining == 0 && spell.name == "Shield" {
-		    state.player.armor -= spell.armor;
-		}
-	    }
-
-	    state.active_spells.retain(|_, rounds_remaining| *rounds_remaining > 0);
-	    GameFlow::Continue
-	};
-	if decision != GameFlow::Continue {
-	    continue;
-	} else if !state.opponent.is_alive() {
-	    return Some(state.mana_spent);
-	} else if !state.player.is_alive() {
-	    continue;
-	}
-
-	let decision = /*'opponents_turn:*/ {
-	    state.player.hp = state.player.hp.saturating_sub(max(state.opponent.damage.saturating_sub(state.player.armor), 1));
-	    GameFlow::Continue
-	};
-	if decision != GameFlow::Continue {
-	    continue;
-	} else if !state.opponent.is_alive() {
-	    return Some(state.mana_spent);
-	} else if !state.player.is_alive() {
-	    continue;
-	}
-
-	let decision = 'next_steps: {
-	    match distances.entry(state.mana_spent) {
-		Entry::Occupied(mut occupied) => {
-		    let (best_opponent_hp, best_player_hp, best_mana) = occupied.get();
-		    if state.opponent.hp > *best_opponent_hp
-			|| state.player.hp < *best_player_hp
-			|| state.player.mana < *best_mana
-		    {
-			// This iteration is not better than previous ones. Prune.
-			break 'next_steps GameFlow::Invalid;
-		    }
-		    occupied.insert(
-		        (
-			    state.opponent.hp,
-			    state.player.hp,
-			    state.player.mana,
-			)
-		    );
-		},
-		Entry::Vacant(vacant) => {
-		    vacant.insert(
-			(
-			    state.opponent.hp,
-			    state.player.hp,
-			    state.player.mana,
-			)
-		    );
-		}
-	    }
-
-            for spell in SPELL_BOOK {
-		let mut next_state = state.clone();
-		next_state.index = unique.next().unwrap();
-		next_state.spell_cast = spell;
-		queue.push(next_state);
-	    }
-
-	    GameFlow::Continue
-	};
-	if decision != GameFlow::Continue {
-	    continue;
-	}
+        for spell in SPELL_BOOK {
+            let new_gamestate = GameState {
+                spell_cast: spell,
+                ..state.gamestate.clone()
+            };
+            let next_state = State {
+                player: state.player,
+                opponent: state.opponent,
+                gamestate: new_gamestate,
+                index: unique_values.next().unwrap(),
+            };
+            queue.push(next_state);
+        }
     }
 
     None
 }
 
-fn part_one(opponent: &Player) -> Result<u32, &str> {
-    match run(opponent, false) {
+fn part_one<'a>(initial_state: &'a State<'a>) -> Result<u32, &str> {
+    match run(initial_state, false) {
         Some(mana_spent) => Ok(mana_spent),
         None => Err("No solution found"),
     }
 }
 
-fn part_two(opponent: &Player) -> Result<u32, &str> {
-    match run(opponent, true) {
+fn part_two<'a>(initial_state: &'a State<'a>) -> Result<u32, &str> {
+    match run(initial_state, true) {
         Some(mana_spent) => Ok(mana_spent),
         None => Err("No solution found"),
     }
@@ -351,7 +385,7 @@ fn parse_opponent(input: &str) -> Player {
     Player {
         hp,
         damage,
-	..Default::default()
+        ..Default::default()
     }
 }
 
@@ -369,9 +403,18 @@ fn main() -> std::io::Result<()> {
     let input = fs::read_to_string(file_path)?;
 
     let opponent = parse_opponent(&input);
+    let initial_state = State {
+        player: Player {
+            hp: 50,
+            mana: 500,
+            ..Default::default()
+        },
+        opponent: opponent.clone(),
+        ..Default::default()
+    };
 
-    time_it(|| println!("part 1: {:?}", part_one(&opponent)));
-    time_it(|| println!("part 2: {:?}", part_two(&opponent)));
+    time_it(|| println!("part 1: {:?}", part_one(&initial_state)));
+    time_it(|| println!("part 2: {:?}", part_two(&initial_state)));
 
     Ok(())
 }
