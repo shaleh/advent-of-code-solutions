@@ -1,11 +1,8 @@
-#![allow(dead_code)]
-
 use std::cmp::{max, Ordering};
 use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashMap};
 use std::env;
 use std::fs;
-use std::ops::RangeFrom;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -27,52 +24,50 @@ struct Spell<'a> {
     mana: u32,
     duration: u32,
 }
+const EMPTY_SPELL: Spell<'_> = Spell {
+    name: "",
+    cost: 0,
+    damage: 0,
+    armor: 0,
+    heal: 0,
+    mana: 0,
+    duration: 0,
+};
 
 const SPELL_BOOK: [Spell; 5] = [
     Spell {
         name: "MagicMissile",
         cost: 53,
         damage: 4,
-        armor: 0,
-        heal: 0,
-        mana: 0,
-        duration: 0,
+        ..EMPTY_SPELL
     },
     Spell {
         name: "Drain",
         cost: 73,
         damage: 2,
-        armor: 0,
         heal: 2,
-        mana: 0,
-        duration: 0,
+        ..EMPTY_SPELL
     },
     Spell {
         name: "Shield",
         cost: 113,
-        damage: 0,
         armor: 7,
-        heal: 2,
-        mana: 0,
         duration: 6,
+        ..EMPTY_SPELL
     },
     Spell {
         name: "Poison",
         cost: 173,
-        armor: 0,
         damage: 3,
-        heal: 2,
-        mana: 0,
         duration: 6,
+        ..EMPTY_SPELL
     },
     Spell {
         name: "Recharge",
         cost: 229,
-        armor: 0,
-        damage: 0,
-        heal: 0,
         mana: 101,
         duration: 5,
+        ..EMPTY_SPELL
     },
 ];
 
@@ -85,26 +80,8 @@ struct Player {
 }
 
 impl Player {
-    fn attack(&self, other: &mut Self) {
-        let damage = match self.damage.saturating_sub(other.armor) {
-            0 => 1,
-            n => n,
-        };
-        other.hp = other.hp.saturating_sub(damage);
-    }
-
     fn is_alive(&self) -> bool {
         self.hp > 0
-    }
-
-    fn cast(&mut self, spell: &Spell) -> Result<(), ()> {
-        if self.mana < spell.cost {
-            return Err(());
-        }
-
-        self.mana -= spell.cost;
-
-        Ok(())
     }
 }
 
@@ -177,46 +154,29 @@ fn resolve_active_spells(state: &mut State) -> GameFlow {
 }
 
 fn player_turn(state: &mut State) -> GameFlow {
-    if state.gamestate.spell_cast.cost > state.player.mana {
+    let spell = state.gamestate.spell_cast;
+
+    if spell.cost > state.player.mana {
         return GameFlow::Invalid;
     }
 
-    if state.gamestate.spell_cast.duration > 0 {
-        if state
-            .gamestate
-            .active_spells
-            .contains_key(state.gamestate.spell_cast.name)
-        {
+    if spell.duration > 0 {
+        if state.gamestate.active_spells.contains_key(spell.name) {
             return GameFlow::Invalid;
         }
 
-        state.gamestate.active_spells.insert(
-            state.gamestate.spell_cast.name,
-            state.gamestate.spell_cast.duration,
-        );
+        state
+            .gamestate
+            .active_spells
+            .insert(spell.name, spell.duration);
     } else {
-        state.opponent.hp = state
-            .opponent
-            .hp
-            .saturating_sub(state.gamestate.spell_cast.damage);
-        state.player.hp = state
-            .player
-            .hp
-            .saturating_add(state.gamestate.spell_cast.heal);
-        state.player.armor = state
-            .player
-            .armor
-            .saturating_add(state.gamestate.spell_cast.armor);
+        state.opponent.hp = state.opponent.hp.saturating_sub(spell.damage);
+        state.player.hp = state.player.hp.saturating_add(spell.heal);
+        state.player.armor = state.player.armor.saturating_add(spell.armor);
     }
 
-    state.player.mana = state
-        .player
-        .mana
-        .saturating_sub(state.gamestate.spell_cast.cost);
-    state.gamestate.mana_spent = state
-        .gamestate
-        .mana_spent
-        .saturating_add(state.gamestate.spell_cast.cost);
+    state.player.mana = state.player.mana.saturating_sub(spell.cost);
+    state.gamestate.mana_spent = state.gamestate.mana_spent.saturating_add(spell.cost);
 
     GameFlow::Continue
 }
@@ -226,6 +186,29 @@ fn opponents_turn(state: &mut State) -> GameFlow {
         state.opponent.damage.saturating_sub(state.player.armor),
         1,
     ));
+    GameFlow::Continue
+}
+
+fn game_round(hard_mode: bool, state: &mut State) -> GameFlow {
+    let steps: [fn(&mut State) -> GameFlow; 5] = [
+        if hard_mode { hard_pre_step } else { pre_step },
+        resolve_active_spells,
+        player_turn,
+        resolve_active_spells,
+        opponents_turn,
+    ];
+
+    for step in steps {
+        let decision = step(state);
+        if decision != GameFlow::Continue {
+            return decision;
+        } else if !state.opponent.is_alive() {
+            return GameFlow::Win;
+        } else if !state.player.is_alive() {
+            return GameFlow::Lose;
+        }
+    }
+
     GameFlow::Continue
 }
 
@@ -257,13 +240,13 @@ fn check_if_best(
 
 fn run(initial_state: &State, hard_mode: bool) -> Option<u32> {
     let mut queue = BinaryHeap::new();
-    let mut distances = HashMap::new();
+    let mut previous_attempts = HashMap::new();
 
     let mut unique_values = 0..;
 
-    // First time this will fill in distances.
+    // First time this will fill in previous attempts with initial values.
     check_if_best(
-        &mut distances,
+        &mut previous_attempts,
         &initial_state.player,
         &initial_state.opponent,
         &initial_state.gamestate,
@@ -283,32 +266,16 @@ fn run(initial_state: &State, hard_mode: bool) -> Option<u32> {
         queue.push(next_state);
     }
 
-    let steps = [
-	if hard_mode {
-	    hard_pre_step
-	} else {
-	    pre_step
-	},
-	resolve_active_spells,
-	player_turn,
-	resolve_active_spells,
-	opponents_turn,
-    ];
-
-    'outer: while let Some(mut state) = queue.pop() {
-	for step in steps {
-            let decision = step(&mut state);
-	    if decision != GameFlow::Continue {
-		continue 'outer;
-	    } else if !state.opponent.is_alive() {
-		return Some(state.gamestate.mana_spent);
-	    } else if !state.player.is_alive() {
-		continue 'outer;
-	    }
-	}
+    while let Some(mut state) = queue.pop() {
+        let decision = game_round(hard_mode, &mut state);
+        if decision == GameFlow::Win || !state.opponent.is_alive() {
+            return Some(state.gamestate.mana_spent);
+        } else if !state.player.is_alive() || decision != GameFlow::Continue {
+            continue;
+        }
 
         let decision = check_if_best(
-            &mut distances,
+            &mut previous_attempts,
             &state.player,
             &state.opponent,
             &state.gamestate,
@@ -389,7 +356,7 @@ fn main() -> std::io::Result<()> {
             mana: 500,
             ..Default::default()
         },
-        opponent: opponent.clone(),
+        opponent,
         ..Default::default()
     };
 
