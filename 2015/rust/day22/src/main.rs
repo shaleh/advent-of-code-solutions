@@ -106,6 +106,7 @@ impl<'a> Ord for State<'a> {
             .gamestate
             .mana_spent
             .cmp(&self.gamestate.mana_spent)
+            // The index helps prevent re-ordering.
             .then_with(|| other.index.cmp(&self.index))
     }
 }
@@ -116,81 +117,93 @@ impl<'a> PartialOrd for State<'a> {
     }
 }
 
-fn pre_step(_state: &mut State) -> GameFlow {
+fn pre_step(_player: &mut Player, _opponent: &mut Player, _gamestate: &mut GameState) -> GameFlow {
     GameFlow::Continue
 }
 
-fn hard_pre_step(state: &mut State) -> GameFlow {
-    state.player.hp = state.player.hp.saturating_sub(1);
+fn hard_pre_step(
+    player: &mut Player,
+    _opponent: &mut Player,
+    _gamestate: &mut GameState,
+) -> GameFlow {
+    player.hp = player.hp.saturating_sub(1);
     GameFlow::Continue
 }
 
-fn resolve_active_spells(state: &mut State) -> GameFlow {
-    if state.gamestate.active_spells.is_empty() {
+fn resolve_active_spells(
+    player: &mut Player,
+    opponent: &mut Player,
+    gamestate: &mut GameState,
+) -> GameFlow {
+    if gamestate.active_spells.is_empty() {
         return GameFlow::Continue;
     }
 
-    for (name, rounds_remaining) in state.gamestate.active_spells.iter_mut() {
+    for (name, rounds_remaining) in gamestate.active_spells.iter_mut() {
         let spell = SPELL_BOOK.iter().find(|spell| spell.name == *name).unwrap();
         if spell.name == "Shield" && *rounds_remaining == spell.duration {
-            state.player.armor += spell.armor;
+            player.armor += spell.armor;
         }
 
         *rounds_remaining = rounds_remaining.saturating_sub(1);
 
-        state.opponent.hp -= spell.damage;
-        state.player.mana += spell.mana;
+        opponent.hp -= spell.damage;
+        player.mana += spell.mana;
 
         if *rounds_remaining == 0 && spell.name == "Shield" {
-            state.player.armor -= spell.armor;
+            player.armor -= spell.armor;
         }
     }
 
-    state
-        .gamestate
+    gamestate
         .active_spells
         .retain(|_, rounds_remaining| *rounds_remaining > 0);
     GameFlow::Continue
 }
 
-fn player_turn(state: &mut State) -> GameFlow {
-    let spell = state.gamestate.spell_cast;
+fn player_turn(player: &mut Player, opponent: &mut Player, gamestate: &mut GameState) -> GameFlow {
+    let spell = gamestate.spell_cast;
 
-    if spell.cost > state.player.mana {
+    if spell.cost > player.mana {
         return GameFlow::Invalid;
     }
 
     if spell.duration > 0 {
-        if state.gamestate.active_spells.contains_key(spell.name) {
+        if gamestate.active_spells.contains_key(spell.name) {
             return GameFlow::Invalid;
         }
 
-        state
-            .gamestate
-            .active_spells
-            .insert(spell.name, spell.duration);
+        gamestate.active_spells.insert(spell.name, spell.duration);
     } else {
-        state.opponent.hp = state.opponent.hp.saturating_sub(spell.damage);
-        state.player.hp = state.player.hp.saturating_add(spell.heal);
-        state.player.armor = state.player.armor.saturating_add(spell.armor);
+        opponent.hp = opponent.hp.saturating_sub(spell.damage);
+        player.hp = player.hp.saturating_add(spell.heal);
+        player.armor = player.armor.saturating_add(spell.armor);
     }
 
-    state.player.mana = state.player.mana.saturating_sub(spell.cost);
-    state.gamestate.mana_spent = state.gamestate.mana_spent.saturating_add(spell.cost);
+    player.mana = player.mana.saturating_sub(spell.cost);
+    gamestate.mana_spent = gamestate.mana_spent.saturating_add(spell.cost);
 
     GameFlow::Continue
 }
 
-fn opponents_turn(state: &mut State) -> GameFlow {
-    state.player.hp = state.player.hp.saturating_sub(max(
-        state.opponent.damage.saturating_sub(state.player.armor),
-        1,
-    ));
+fn opponents_turn(
+    player: &mut Player,
+    opponent: &mut Player,
+    _gamestate: &mut GameState,
+) -> GameFlow {
+    player.hp = player
+        .hp
+        .saturating_sub(max(opponent.damage.saturating_sub(player.armor), 1));
     GameFlow::Continue
 }
 
-fn game_round(hard_mode: bool, state: &mut State) -> GameFlow {
-    let steps: [fn(&mut State) -> GameFlow; 5] = [
+fn game_round(
+    hard_mode: bool,
+    player: &mut Player,
+    opponent: &mut Player,
+    gamestate: &mut GameState,
+) -> GameFlow {
+    let steps = [
         if hard_mode { hard_pre_step } else { pre_step },
         resolve_active_spells,
         player_turn,
@@ -199,12 +212,12 @@ fn game_round(hard_mode: bool, state: &mut State) -> GameFlow {
     ];
 
     for step in steps {
-        let decision = step(state);
+        let decision = step(player, opponent, gamestate);
         if decision != GameFlow::Continue {
             return decision;
-        } else if !state.opponent.is_alive() {
+        } else if !opponent.is_alive() {
             return GameFlow::Win;
-        } else if !state.player.is_alive() {
+        } else if !player.is_alive() {
             return GameFlow::Lose;
         }
     }
@@ -213,14 +226,17 @@ fn game_round(hard_mode: bool, state: &mut State) -> GameFlow {
 }
 
 fn check_if_best(
-    distances: &mut HashMap<u32, (u32, u32, u32)>,
+    previous_attempts: &mut HashMap<u32, (u32, u32, u32)>,
     player: &Player,
     opponent: &Player,
     gamestate: &GameState,
 ) -> GameFlow {
-    match distances.entry(gamestate.mana_spent) {
+    match previous_attempts.entry(gamestate.mana_spent) {
         Entry::Occupied(mut occupied) => {
             let (best_opponent_hp, best_player_hp, best_mana) = occupied.get();
+            // Less opponent hp is better.
+            // More player hp is better.
+            // More mana is better.
             if opponent.hp > *best_opponent_hp
                 || player.hp < *best_player_hp
                 || player.mana < *best_mana
@@ -266,20 +282,21 @@ fn run(initial_state: &State, hard_mode: bool) -> Option<u32> {
         queue.push(next_state);
     }
 
-    while let Some(mut state) = queue.pop() {
-        let decision = game_round(hard_mode, &mut state);
-        if decision == GameFlow::Win || !state.opponent.is_alive() {
-            return Some(state.gamestate.mana_spent);
-        } else if !state.player.is_alive() || decision != GameFlow::Continue {
+    while let Some(State {
+        mut player,
+        mut opponent,
+        mut gamestate,
+        ..
+    }) = queue.pop()
+    {
+        let decision = game_round(hard_mode, &mut player, &mut opponent, &mut gamestate);
+        if decision == GameFlow::Win || !opponent.is_alive() {
+            return Some(gamestate.mana_spent);
+        } else if !player.is_alive() || decision != GameFlow::Continue {
             continue;
         }
 
-        let decision = check_if_best(
-            &mut previous_attempts,
-            &state.player,
-            &state.opponent,
-            &state.gamestate,
-        );
+        let decision = check_if_best(&mut previous_attempts, &player, &opponent, &gamestate);
         if decision != GameFlow::Continue {
             continue;
         }
@@ -287,11 +304,11 @@ fn run(initial_state: &State, hard_mode: bool) -> Option<u32> {
         for spell in SPELL_BOOK {
             let new_gamestate = GameState {
                 spell_cast: spell,
-                ..state.gamestate.clone()
+                ..gamestate.clone()
             };
             let next_state = State {
-                player: state.player,
-                opponent: state.opponent,
+                player,
+                opponent,
                 gamestate: new_gamestate,
                 index: unique_values.next().unwrap(),
             };
@@ -302,15 +319,8 @@ fn run(initial_state: &State, hard_mode: bool) -> Option<u32> {
     None
 }
 
-fn part_one<'a>(initial_state: &'a State<'a>) -> Result<u32, &str> {
-    match run(initial_state, false) {
-        Some(mana_spent) => Ok(mana_spent),
-        None => Err("No solution found"),
-    }
-}
-
-fn part_two<'a>(initial_state: &'a State<'a>) -> Result<u32, &str> {
-    match run(initial_state, true) {
+fn start<'a>(hard_mode: bool, initial_state: &'a State<'a>) -> Result<u32, &str> {
+    match run(initial_state, hard_mode) {
         Some(mana_spent) => Ok(mana_spent),
         None => Err("No solution found"),
     }
@@ -360,8 +370,8 @@ fn main() -> std::io::Result<()> {
         ..Default::default()
     };
 
-    time_it(|| println!("part 1: {:?}", part_one(&initial_state)));
-    time_it(|| println!("part 2: {:?}", part_two(&initial_state)));
+    time_it(|| println!("part 1: {:?}", start(false, &initial_state)));
+    time_it(|| println!("part 2: {:?}", start(true, &initial_state)));
 
     Ok(())
 }
