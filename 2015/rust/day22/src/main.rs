@@ -139,10 +139,12 @@ impl<'a> PartialOrd for State<'a> {
     }
 }
 
-fn pre_step(hard_mode: bool, state: &mut State) -> GameFlow {
-    if hard_mode {
-        state.player.hp = state.player.hp.saturating_sub(1);
-    }
+fn pre_step(_state: &mut State) -> GameFlow {
+    GameFlow::Continue
+}
+
+fn hard_pre_step(state: &mut State) -> GameFlow {
+    state.player.hp = state.player.hp.saturating_sub(1);
     GameFlow::Continue
 }
 
@@ -281,51 +283,29 @@ fn run(initial_state: &State, hard_mode: bool) -> Option<u32> {
         queue.push(next_state);
     }
 
-    while let Some(mut state) = queue.pop() {
-        let decision = pre_step(hard_mode, &mut state);
-        if decision != GameFlow::Continue {
-            continue;
-        } else if !state.opponent.is_alive() {
-            return Some(state.gamestate.mana_spent);
-        } else if !state.player.is_alive() {
-            continue;
-        }
+    let steps = [
+	if hard_mode {
+	    hard_pre_step
+	} else {
+	    pre_step
+	},
+	resolve_active_spells,
+	player_turn,
+	resolve_active_spells,
+	opponents_turn,
+    ];
 
-        let decision = resolve_active_spells(&mut state);
-        if decision != GameFlow::Continue {
-            continue;
-        } else if !state.opponent.is_alive() {
-            return Some(state.gamestate.mana_spent);
-        } else if !state.player.is_alive() {
-            continue;
-        }
-
-        let decision = player_turn(&mut state);
-        if decision != GameFlow::Continue {
-            continue;
-        } else if !state.opponent.is_alive() {
-            return Some(state.gamestate.mana_spent);
-        } else if !state.player.is_alive() {
-            continue;
-        }
-
-        let decision = resolve_active_spells(&mut state);
-        if decision != GameFlow::Continue {
-            continue;
-        } else if !state.opponent.is_alive() {
-            return Some(state.gamestate.mana_spent);
-        } else if !state.player.is_alive() {
-            continue;
-        }
-
-        let decision = opponents_turn(&mut state);
-        if decision != GameFlow::Continue {
-            continue;
-        } else if !state.opponent.is_alive() {
-            return Some(state.gamestate.mana_spent);
-        } else if !state.player.is_alive() {
-            continue;
-        }
+    'outer: while let Some(mut state) = queue.pop() {
+	for step in steps {
+            let decision = step(&mut state);
+	    if decision != GameFlow::Continue {
+		continue 'outer;
+	    } else if !state.opponent.is_alive() {
+		return Some(state.gamestate.mana_spent);
+	    } else if !state.player.is_alive() {
+		continue 'outer;
+	    }
+	}
 
         let decision = check_if_best(
             &mut distances,
