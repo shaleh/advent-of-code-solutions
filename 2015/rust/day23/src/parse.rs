@@ -29,12 +29,13 @@ fn with_register(input: &str) -> IResult<&str, Instruction> {
     )(input)?;
 
     let register_index = map_register(register);
-    match name {
-        "hlf" => Ok((input, Instruction::Hlf(register_index))),
-        "inc" => Ok((input, Instruction::Inc(register_index))),
-        "tpl" => Ok((input, Instruction::Tpl(register_index))),
+    let keyword = match name {
+        "hlf" => Instruction::Hlf,
+        "inc" => Instruction::Inc,
+        "tpl" => Instruction::Tpl,
         _ => unreachable!(),
-    }
+    };
+    Ok((input, keyword(register_index)))
 }
 
 fn jump(input: &str) -> IResult<&str, Instruction> {
@@ -52,11 +53,12 @@ fn jump_if(input: &str) -> IResult<&str, Instruction> {
 
     let register_index = map_register(register);
 
-    match name {
-        "jie" => Ok((input, Instruction::Jie((register_index, offset)))),
-        "jio" => Ok((input, Instruction::Jio((register_index, offset)))),
+    let keyword = match name {
+        "jie" => Instruction::Jie,
+        "jio" => Instruction::Jio,
         _ => unreachable!(),
-    }
+    };
+    Ok((input, keyword((register_index, offset))))
 }
 
 fn instruction(input: &str) -> IResult<&str, Instruction> {
