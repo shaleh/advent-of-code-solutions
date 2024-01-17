@@ -9,4 +9,15 @@ members = [
     "day6",
     "day7",
     "day8",
+    "day9",
+    "day10",
+    "day15",
+    "day16",
+    "day17",
+    "day21",
+    "day22",
+    "day23",
+    "day24",
+    "day25",
 ]
+resolver = "2"
