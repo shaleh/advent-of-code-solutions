@@ -1,47 +1,7 @@
-#![feature(exclusive_range_pattern)]
-
 use advent_support::read_input;
 
 fn raw_input_length(input: &str) -> usize {
     input.len()
-}
-
-fn input_length(input: &str) -> usize {
-    let mut count = 0;
-    let mut escaped = false;
-    let mut hex_count = 0;
-
-    for c in input.chars() {
-        if escaped {
-            match c {
-                '"' | '\\' => {
-                    escaped = false;
-                    count += 1;
-                }
-                'x' if hex_count == 0 => {
-                    hex_count = 2;
-                }
-                'a'..='f' | '0'..='9' if hex_count > 0 => {
-                    hex_count -= 1;
-                    if hex_count == 0 {
-                        escaped = false;
-                        count += 1;
-                    }
-                }
-                _ => panic!("invalid escape {}", c),
-            }
-        } else {
-            count += match c {
-                '"' => 0,
-                '\\' => {
-                    escaped = true;
-                    0
-                }
-                _ => 1,
-            }
-        }
-    }
-    count
 }
 
 fn main() {
@@ -51,7 +11,7 @@ fn main() {
     let lines = read_input::<String>().expect("Invalid input");
 
     let mut idx = 0;
-    
+
     for line in lines {
         idx += 1;
         println!("{}", idx);
@@ -60,7 +20,12 @@ fn main() {
         count += raw_input_length(&escaped_line);
     }
 
-    println!("Raw {} Evaluated {} Delta {}", raw_count, count, count - raw_count);
+    println!(
+        "Raw {} Evaluated {} Delta {}",
+        raw_count,
+        count,
+        count - raw_count
+    );
 }
 
 #[cfg(test)]
@@ -113,6 +78,9 @@ mod test {
 
     #[test]
     fn test_example() {
-        assert_eq!(22, raw_input_length(r#""\xa8br\x8bjr\"""#.escape_default().to_string().as_ref()));
+        assert_eq!(
+            22,
+            raw_input_length(r#""\xa8br\x8bjr\"""#.escape_default().to_string().as_ref())
+        );
     }
 }
