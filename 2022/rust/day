@@ -1,0 +1,12 @@
+#!/bin/sh
+
+if [ ! -d day$1 ]; then
+    cargo generate --path template --name day$1
+    edit day$1/src/main.rs
+    exit 0
+fi
+
+cargo fmt -p day$1
+cargo clippy -p day$1
+cargo test -p day$1
+cargo run --bin day$1 < ../inputs/$1
